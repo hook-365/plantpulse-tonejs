@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PlantPulse</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cookie&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
@@ -39,7 +40,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 32px;
+      padding: 10px 24px;
       border-bottom: 1px solid transparent;
       border-image: linear-gradient(90deg, rgba(52,211,153,0.3) 0%, rgba(110,168,254,0.35) 50%, rgba(167,139,250,0.3) 100%) 1;
     }
@@ -51,7 +52,7 @@
     }
 
     .logo img {
-      height: 36px;
+      height: 28px;
       width: auto;
     }
 
@@ -59,13 +60,13 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 13px;
+      font-size: 12px;
       color: #8896b0;
     }
 
     .status-dot {
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       background: #4d5d78;
       transition: background 0.3s;
@@ -75,19 +76,47 @@
     .status-dot.error { background: #f87171; box-shadow: 0 0 8px rgba(248,113,113,0.5); }
 
     .stats-bar {
-      position: relative;
-      z-index: 1;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      padding: 24px 32px;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      flex: 1;
+      align-content: start;
+    }
+
+    .section-panel {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 16px 24px;
+      position: relative;
+      border-left: 2px solid transparent;
+    }
+
+    .section-panel:first-of-type {
+      margin-top: 20px;
+    }
+
+    .section-signal {
+      border-left-color: #c47a5a;
+      box-shadow: inset 2px 0 12px -6px rgba(196, 122, 90, 0.15), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
+    }
+
+    .section-music {
+      border-left-color: #9b8ec4;
+      box-shadow: inset 2px 0 12px -6px rgba(155, 142, 196, 0.15), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
+    }
+
+    .section-chart {
+      border-left-color: #6ea8fe;
+      box-shadow: inset 2px 0 12px -6px rgba(110, 168, 254, 0.15), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
     }
 
     .stat-card {
-      background: #141c2e;
-      border: 1px solid #1e2d4a;
-      border-radius: 12px;
-      padding: 16px 20px;
+      background: #0f1520;
+      border: 1px solid #1a2540;
+      border-radius: 8px;
+      padding: 8px 12px;
       transition: border-color 0.2s;
     }
 
@@ -96,51 +125,96 @@
     }
 
     .stat-card .label {
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 1.5px;
       color: #8896b0;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
 
     .stat-card .value {
-      font-size: 28px;
+      font-size: 20px;
       font-weight: 700;
       color: #e8ecf4;
     }
 
     .stat-card .value .unit {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 400;
       color: #4d5d78;
     }
 
-    .chart-container {
-      position: relative;
-      z-index: 1;
-      padding: 20px 32px;
+    .signal-layout {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
     }
 
-    .chart-wrapper {
-      background: #141c2e;
-      border: 1px solid #1e2d4a;
-      border-radius: 12px;
-      padding: 20px;
+    .plant-info {
+      min-width: 200px;
+      max-width: 240px;
+      display: flex;
+      flex-direction: column;
+      padding-right: 16px;
+      border-right: 1px solid #1a2540;
+    }
+
+    .plant-info-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #4a5568;
+      margin-bottom: 4px;
+    }
+
+    .plant-name {
+      font-family: 'Cookie', cursive;
+      font-size: 32px;
+      font-weight: 400;
+      color: #e8ecf4;
+      line-height: 1.1;
+    }
+
+    .plant-type {
+      font-size: 12px;
+      color: #c47a5a;
+      margin-bottom: auto;
+    }
+
+    .plant-info .activity-bar-inline {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #1a2540;
+    }
+
+    .stats-bar .activity-bar-inline {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #1a2540;
+    }
+
+    .chart-inner {
       position: relative;
     }
 
-    .chart-wrapper canvas {
+    .chart-inner canvas {
       width: 100% !important;
     }
 
-    .controls {
-      position: relative;
-      z-index: 1;
+    .chart-controls {
       display: flex;
-      gap: 10px;
-      padding: 0 32px 20px;
-      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .music-playback {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #1a2540;
     }
 
     button {
@@ -148,9 +222,9 @@
       color: #e8ecf4;
       border: 1px solid #1e2d4a;
       border-radius: 8px;
-      padding: 8px 18px;
+      padding: 6px 14px;
       font-family: inherit;
-      font-size: 13px;
+      font-size: 12px;
       cursor: pointer;
       transition: all 0.15s;
     }
@@ -174,17 +248,11 @@
       font-size: 12px;
     }
 
-    .activity-bar-container {
-      position: relative;
-      z-index: 1;
-      padding: 0 32px 20px;
-    }
-
     .activity-bar-wrapper {
       background: #141c2e;
       border: 1px solid #1e2d4a;
-      border-radius: 12px;
-      padding: 16px 20px;
+      border-radius: 10px;
+      padding: 10px 14px;
     }
 
     .activity-bar-label {
@@ -196,7 +264,7 @@
     }
 
     .activity-bar {
-      height: 24px;
+      height: 18px;
       background: #1a2540;
       border-radius: 12px;
       overflow: hidden;
@@ -222,29 +290,15 @@
       text-shadow: 0 1px 3px rgba(0,0,0,0.5);
     }
 
-    /* --- Music Controls --- */
-    .music-section {
-      position: relative;
-      z-index: 1;
-      padding: 0 32px 20px;
-    }
-
-    .music-wrapper {
-      background: #141c2e;
-      border: 1px solid #1e2d4a;
-      border-radius: 12px;
-      padding: 20px;
-    }
-
     .music-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 16px;
+      margin-bottom: 10px;
     }
 
     .music-header h2 {
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 1.5px;
       color: #8896b0;
@@ -298,52 +352,119 @@
       cursor: pointer;
     }
 
-    .note-display {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-top: 16px;
-      padding-top: 16px;
+    .layer-display {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
       border-top: 1px solid #1e2d4a;
     }
 
-    .current-note {
-      font-size: 48px;
-      font-weight: 700;
-      color: #34d399;
-      min-width: 120px;
-      text-align: center;
-      transition: color 0.2s;
-    }
-
-    .current-note.playing {
-      color: #6ea8fe;
-      text-shadow: 0 0 20px rgba(110,168,254,0.5);
-    }
-
-    .note-history {
+    .layer-row {
       display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      flex: 1;
+      align-items: center;
+      gap: 8px;
     }
 
-    .note-pip {
+    .layer-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8896b0;
+      min-width: 70px;
+    }
+
+    .layer-toggle {
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s;
+    }
+
+    .layer-toggle:hover {
+      color: #e8ecf4;
+    }
+
+    .layer-toggle.muted {
+      color: #3a4560;
+      text-decoration: line-through;
+    }
+
+    .layer-row.muted .layer-bar-fill {
+      opacity: 0.15;
+    }
+
+    .layer-row.muted .layer-note {
+      color: #3a4560;
+    }
+
+    .layer-bar {
+      flex: 1;
+      height: 6px;
+      background: #1a2540;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .layer-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.15s ease-out;
+      width: 0%;
+    }
+
+    .layer-bar-fill.bass { background: linear-gradient(90deg, #c47a5a, #d4956a); }
+    .layer-bar-fill.melody { background: linear-gradient(90deg, #34d399, #6ee7b7); }
+    .layer-bar-fill.arpeggio { background: linear-gradient(90deg, #6ea8fe, #93bbfd); }
+    .layer-bar-fill.chime { background: linear-gradient(90deg, #c084fc, #d8b4fe); }
+
+    .layer-note {
+      font-size: 11px;
+      color: #e8ecf4;
+      min-width: 32px;
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .tempo-display {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #1e2d4a;
+    }
+
+    .tempo-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #e8ecf4;
+      min-width: 60px;
+    }
+
+    .tempo-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8896b0;
+    }
+
+    .tempo-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       background: #1e2d4a;
-      transition: all 0.3s;
+      transition: all 0.1s;
     }
 
-    .note-pip.active {
-      background: #6ea8fe;
-      box-shadow: 0 0 6px rgba(110,168,254,0.5);
+    .tempo-dot.beat {
+      background: #34d399;
+      box-shadow: 0 0 8px rgba(52,211,153,0.6);
     }
 
     #musicBtn {
-      font-size: 15px;
-      padding: 10px 24px;
+      font-size: 13px;
+      padding: 6px 18px;
     }
 
     #musicBtn.playing {
@@ -356,6 +477,41 @@
     @keyframes pulse-glow {
       0%, 100% { box-shadow: 0 0 5px rgba(52,211,153,0.15); }
       50% { box-shadow: 0 0 20px rgba(52,211,153,0.3); }
+    }
+
+    #recBtn.recording {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #ef4444;
+      animation: rec-pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes rec-pulse {
+      0%, 100% { box-shadow: 0 0 5px rgba(239,68,68,0.2); }
+      50% { box-shadow: 0 0 15px rgba(239,68,68,0.4); }
+    }
+
+    .rec-timer {
+      font-size: 11px;
+      color: #ef4444;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      font-size: 11px;
+      color: #34d399;
+      border: 1px solid #34d399;
+      border-radius: 6px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .download-link:hover {
+      background: rgba(52,211,153,0.15);
     }
 
     .divider {
@@ -371,6 +527,124 @@
     ::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #2a3d5e; }
     ::selection { background: rgba(110,168,254,0.3); color: #fff; }
+
+    /* --- Header Links --- */
+    .header-links {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-right: 16px;
+    }
+
+    .header-link {
+      font-size: 11px;
+      color: #9ba8c0;
+      text-decoration: none;
+      border: 1px solid rgba(110, 168, 254, 0.2);
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: rgba(110, 168, 254, 0.05);
+      letter-spacing: 0.3px;
+    }
+
+    .header-link:hover {
+      color: #e8ecf4;
+      border-color: rgba(110, 168, 254, 0.4);
+      background: rgba(110, 168, 254, 0.1);
+    }
+
+    .coffee-link {
+      font-family: 'Cookie', cursive;
+      font-size: 15px;
+      color: #c47a5a;
+      border-color: rgba(196, 122, 90, 0.3);
+    }
+
+    .coffee-link:hover {
+      color: #e8a87c;
+      border-color: #c47a5a;
+    }
+
+    /* --- About Modal --- */
+    .about-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .about-modal.show {
+      display: flex;
+    }
+
+    .about-content {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+      padding: 28px;
+      max-width: 520px;
+      width: 90%;
+      position: relative;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .about-content h2 {
+      font-size: 18px;
+      color: #e8ecf4;
+      margin-bottom: 14px;
+      border-bottom: 1px solid #1e2d4a;
+      padding-bottom: 10px;
+    }
+
+    .about-content h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #6ea8fe;
+      margin: 16px 0 6px;
+    }
+
+    .about-content p {
+      font-size: 13px;
+      color: #8896b0;
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+
+    .about-content a {
+      color: #6ea8fe;
+      text-decoration: none;
+    }
+
+    .about-content a:hover {
+      color: #93bbfd;
+      text-decoration: underline;
+    }
+
+    .about-close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      background: none;
+      border: none;
+      color: #8896b0;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+
+    .about-close:hover {
+      color: #e8ecf4;
+      background: none;
+      border: none;
+    }
   </style>
 </head>
 <body>
@@ -378,103 +652,164 @@
     <div class="logo">
       <img src="logo.svg" alt="PlantPulse">
     </div>
-    <div class="connection-status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Connecting...</span>
-      <button id="connectBtn" onclick="toggleConnection()" style="margin-left: 4px; padding: 4px 12px; font-size: 11px;">Disconnect</button>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="header-links">
+        <a class="header-link" onclick="document.getElementById('aboutModal').classList.add('show')">About</a>
+        <a class="header-link" href="https://github.com/hook-365/plantpulse" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="header-link coffee-link" href="https://buymeacoffee.com/anthonyhook" target="_blank" rel="noopener noreferrer">&#9749; Buy me a coffee</a>
+      </div>
+      <div class="connection-status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Connecting...</span>
+        <button id="connectBtn" onclick="toggleConnection()" style="margin-left: 4px; padding: 4px 12px; font-size: 11px;">Disconnect</button>
+      </div>
     </div>
   </header>
 
-  <div class="stats-bar">
-    <div class="stat-card">
-      <div class="label">Raw Signal</div>
-      <div class="value" id="rawValue">-- <span class="unit">mV</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Smoothed</div>
-      <div class="value" id="smoothedValue">-- <span class="unit">mV</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Min / Max</div>
-      <div class="value" id="minMaxValue">-- <span class="unit">mV</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Avg (60s)</div>
-      <div class="value" id="avgValue">-- <span class="unit">mV</span></div>
+  <!-- About Modal -->
+  <div class="about-modal" id="aboutModal" onclick="if(event.target===this)this.classList.remove('show')">
+    <div class="about-content">
+      <button class="about-close" onclick="document.getElementById('aboutModal').classList.remove('show')">&times;</button>
+      <h2>PlantPulse</h2>
+      <p>A DIY plant bioelectrical sonification system. PlantPulse reads microvolt-level electrical signals from plant leaves and transforms them into generative ambient music in real-time.</p>
+
+      <h3>How it works</h3>
+      <p>Soft alligator clips attach to a plant leaf, picking up tiny bioelectrical fluctuations. An ADS1115 16-bit ADC digitizes these signals, and an ESP32 microcontroller streams the raw voltage readings via MQTT. This browser dashboard visualizes the signal and maps it to music using the Web Audio API.</p>
+
+      <h3>The music</h3>
+      <p>Four instrument layers respond to different aspects of the plant's electrical activity:</p>
+      <p><strong>Bass</strong> &mdash; deep drone following the smoothed signal drift<br>
+      <strong>Melody</strong> &mdash; note selection driven by raw voltage, rhythm set by the plant's natural oscillation tempo<br>
+      <strong>Arpeggio</strong> &mdash; broken chord patterns that activate when the plant is electrically active<br>
+      <strong>Chimes</strong> &mdash; sparkly accents triggered by sudden signal spikes</p>
+
+      <h3>Hardware</h3>
+      <p>ESP32-WROOM-32D, ADS1115 ADC, soft alligator clips. Total cost ~$15. Full build instructions on <a href="https://github.com/hook-365/plantpulse" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+
+      <p style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #1e2d4a; font-size: 11px; color: #4a5568;">Built by <a href="https://github.com/hook-365">Anthony Hook</a></p>
     </div>
   </div>
 
-  <div class="activity-bar-container">
-    <div class="activity-bar-wrapper">
-      <div class="activity-bar-label">Plant Activity</div>
-      <div class="activity-bar">
-        <div class="activity-bar-fill" id="activityFill"></div>
-        <div class="activity-bar-value" id="activityValue">0%</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Music Section -->
-  <div class="music-section">
-    <div class="music-wrapper">
-      <div class="music-header">
-        <h2>Sonification</h2>
-        <div class="music-controls">
-          <label>Scale:</label>
-          <select id="scaleSelect" onchange="updateScale()">
-            <option value="pentatonic" selected>Pentatonic</option>
-            <option value="major">Major</option>
-            <option value="minor">Natural Minor</option>
-            <option value="dorian">Dorian</option>
-            <option value="mixolydian">Mixolydian</option>
-            <option value="wholeTone">Whole Tone</option>
-          </select>
-          <label>Root:</label>
-          <select id="rootSelect" onchange="updateScale()">
-            <option value="C">C</option>
-            <option value="D">D</option>
-            <option value="E">E</option>
-            <option value="F">F</option>
-            <option value="G" selected>G</option>
-            <option value="A">A</option>
-            <option value="B">B</option>
-          </select>
-          <div class="divider"></div>
-          <label>Voice:</label>
-          <select id="voiceSelect" onchange="updateVoice()">
-            <option value="bells" selected>Bells</option>
-            <option value="pad">Soft Pad</option>
-            <option value="pluck">Pluck</option>
-            <option value="wind">Wind</option>
-          </select>
-          <div class="divider"></div>
-          <label>Vol:</label>
-          <input type="range" id="volumeSlider" min="0" max="100" value="60" oninput="updateVolume()">
+  <!-- Section 1: Signal Data -->
+  <div class="section-panel section-signal">
+    <div class="signal-layout">
+      <div class="plant-info">
+        <div class="plant-info-label">Currently listening to</div>
+        <div class="plant-name" id="plantName">--</div>
+        <div class="plant-type" id="plantType">--</div>
+        <div class="activity-bar-inline">
+          <div class="activity-bar-label">Plant Activity</div>
+          <div class="activity-bar">
+            <div class="activity-bar-fill" id="activityFill"></div>
+            <div class="activity-bar-value" id="activityValue">0%</div>
+          </div>
         </div>
       </div>
-      <div class="note-display">
-        <div class="current-note" id="currentNote">--</div>
-        <div class="note-history" id="noteHistory">
+      <div class="stats-bar">
+        <div class="stat-card">
+          <div class="label">Raw Signal</div>
+          <div class="value" id="rawValue">-- <span class="unit">mV</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Smoothed</div>
+          <div class="value" id="smoothedValue">-- <span class="unit">mV</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Min / Max</div>
+          <div class="value" id="minMaxValue">-- <span class="unit">mV</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Avg (60s)</div>
+          <div class="value" id="avgValue">-- <span class="unit">mV</span></div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="controls">
-    <button id="musicBtn" onclick="toggleMusic()">Play</button>
-    <button id="pauseBtn" onclick="togglePause()">Pause</button>
-    <button onclick="clearChart()">Clear</button>
-    <div class="window-selector">
-      <button class="active" onclick="setWindow(30, this)">30s</button>
-      <button onclick="setWindow(60, this)">1m</button>
-      <button onclick="setWindow(120, this)">2m</button>
-      <button onclick="setWindow(300, this)">5m</button>
+  <!-- Section 2: Music -->
+  <div class="section-panel section-music">
+    <div class="music-header">
+      <h2>Sonification <span style="font-weight: 300; font-size: 9px; letter-spacing: 0.5px; color: #4a5568; margin-left: 8px;">click layers to toggle</span></h2>
+      <div class="music-controls">
+        <label>Scale:</label>
+        <select id="scaleSelect" onchange="updateScale()">
+          <option value="pentatonic" selected>Pentatonic</option>
+          <option value="major">Major</option>
+          <option value="minor">Natural Minor</option>
+          <option value="dorian">Dorian</option>
+          <option value="mixolydian">Mixolydian</option>
+          <option value="wholeTone">Whole Tone</option>
+        </select>
+        <label>Root:</label>
+        <select id="rootSelect" onchange="updateScale()">
+          <option value="C">C</option>
+          <option value="D">D</option>
+          <option value="E">E</option>
+          <option value="F">F</option>
+          <option value="G" selected>G</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+        </select>
+        <div class="divider"></div>
+        <label>Voice:</label>
+        <select id="voiceSelect" onchange="updateVoice()">
+          <option value="bells" selected>Bells</option>
+          <option value="pad">Soft Pad</option>
+          <option value="pluck">Pluck</option>
+          <option value="wind">Wind</option>
+        </select>
+        <div class="divider"></div>
+        <label>Vol:</label>
+        <input type="range" id="volumeSlider" min="0" max="100" value="60" oninput="updateVolume()">
+      </div>
+    </div>
+    <div class="layer-display">
+      <div class="layer-row" id="bassRow">
+        <span class="layer-label layer-toggle" onclick="toggleLayer('bass')">Bass</span>
+        <div class="layer-bar"><div class="layer-bar-fill bass" id="bassBar"></div></div>
+        <span class="layer-note" id="bassNote">--</span>
+      </div>
+      <div class="layer-row" id="melodyRow">
+        <span class="layer-label layer-toggle" onclick="toggleLayer('melody')">Melody</span>
+        <div class="layer-bar"><div class="layer-bar-fill melody" id="melodyBar"></div></div>
+        <span class="layer-note" id="melodyNote">--</span>
+      </div>
+      <div class="layer-row" id="arpRow">
+        <span class="layer-label layer-toggle" onclick="toggleLayer('arp')">Arpeggio</span>
+        <div class="layer-bar"><div class="layer-bar-fill arpeggio" id="arpBar"></div></div>
+        <span class="layer-note" id="arpNote">--</span>
+      </div>
+      <div class="layer-row" id="chimeRow">
+        <span class="layer-label layer-toggle" onclick="toggleLayer('chime')">Chimes</span>
+        <div class="layer-bar"><div class="layer-bar-fill chime" id="chimeBar"></div></div>
+        <span class="layer-note" id="chimeNote">--</span>
+      </div>
+    </div>
+    <div class="tempo-display">
+      <div class="tempo-dot" id="tempoDot"></div>
+      <div><span class="tempo-value" id="tempoValue">--</span> <span class="tempo-label">BPM</span></div>
+      <span class="layer-label" id="tempoSource" style="margin-left: auto;">detecting...</span>
+    </div>
+    <div class="music-playback">
+      <button id="musicBtn" onclick="toggleMusic()">Play</button>
+      <button id="recBtn" onclick="toggleRecording()">Rec</button>
+      <button id="pauseBtn" onclick="togglePause()">Pause</button>
     </div>
   </div>
 
-  <div class="chart-container">
-    <div class="chart-wrapper">
-      <canvas id="plantChart" height="350"></canvas>
+  <!-- Section 3: Chart -->
+  <div class="section-panel section-chart">
+    <div class="chart-controls">
+      <button onclick="clearChart()">Clear</button>
+      <div class="window-selector">
+        <button class="active" onclick="setWindow(30, this)">30s</button>
+        <button onclick="setWindow(60, this)">1m</button>
+        <button onclick="setWindow(120, this)">2m</button>
+        <button onclick="setWindow(300, this)">5m</button>
+      </div>
+    </div>
+    <div class="chart-inner">
+      <canvas id="plantChart" height="220"></canvas>
     </div>
   </div>
 
@@ -507,14 +842,62 @@
     let currentRawValue = 0;
     let currentActivity = 0;
     let currentSmoothed = 0;
-    let lastNoteTime = 0;
-    let lastNote = '';
-    let noteHistoryList = [];
-    const MAX_NOTE_PIPS = 40;
 
     // Signal range (auto-calibrates from observed data)
     let signalMin = -3;
     let signalMax = 3;
+
+    // --- Tempo Detection ---
+    let zeroCrossings = [];       // timestamps of mean-crossings
+    let lastSignForTempo = 0;     // +1 or -1, relative to running mean
+    let detectedBPM = 40;         // default ambient tempo
+    let tempoMean = 0;            // running mean for zero-crossing detection
+    let tempoMeanCount = 0;
+    let lastBeatTime = 0;
+    let beatPhase = 0;
+
+    function updateTempo(value) {
+      // Update running mean
+      tempoMeanCount++;
+      tempoMean += (value - tempoMean) / Math.min(tempoMeanCount, 100);
+
+      // Detect zero-crossings (signal crossing its own mean)
+      const sign = value >= tempoMean ? 1 : -1;
+      if (lastSignForTempo !== 0 && sign !== lastSignForTempo) {
+        const now = Date.now();
+        zeroCrossings.push(now);
+
+        // Keep last 20 crossings (10 full cycles)
+        if (zeroCrossings.length > 20) zeroCrossings.shift();
+
+        // Need at least 4 crossings (2 full cycles) to estimate
+        if (zeroCrossings.length >= 4) {
+          const totalTime = zeroCrossings[zeroCrossings.length - 1] - zeroCrossings[0];
+          const numHalfCycles = zeroCrossings.length - 1;
+          const avgHalfCycleMs = totalTime / numHalfCycles;
+          const fullCycleMs = avgHalfCycleMs * 2;
+          const rawBPM = 60000 / fullCycleMs;
+
+          // Clamp to musical range and quantize to feel natural
+          const clampedBPM = Math.max(20, Math.min(120, rawBPM));
+          // Smooth tempo changes
+          detectedBPM = detectedBPM * 0.7 + clampedBPM * 0.3;
+
+          document.getElementById('tempoValue').textContent = Math.round(detectedBPM);
+          document.getElementById('tempoSource').textContent =
+            fullCycleMs > 8000 ? 'slow drift' :
+            fullCycleMs > 3000 ? 'gentle rhythm' :
+            fullCycleMs > 1000 ? 'active pulse' : 'rapid';
+        }
+      }
+      lastSignForTempo = sign;
+    }
+
+    function pulseBeat() {
+      const dot = document.getElementById('tempoDot');
+      dot.classList.add('beat');
+      setTimeout(() => dot.classList.remove('beat'), 150);
+    }
 
     // Scale definitions (intervals in semitones from root)
     const SCALES = {
@@ -526,7 +909,6 @@
       wholeTone:   [0, 2, 4, 6, 8, 10],
     };
 
-    // Build note pool spanning multiple octaves
     let currentNotes = [];
 
     function buildNotePool() {
@@ -534,13 +916,11 @@
       const scaleType = document.getElementById('scaleSelect').value;
       const intervals = SCALES[scaleType];
 
-      // Root note MIDI numbers (octave 3 as base)
       const rootMidi = { C: 48, D: 50, E: 52, F: 53, G: 55, A: 57, B: 59 };
       const baseMidi = rootMidi[root];
 
-      // Build 3 octaves of notes
       const notes = [];
-      for (let octave = 0; octave < 3; octave++) {
+      for (let octave = 0; octave < 4; octave++) {
         for (const interval of intervals) {
           const midi = baseMidi + (octave * 12) + interval;
           notes.push(Tone.Frequency(midi, 'midi').toNote());
@@ -549,108 +929,136 @@
       currentNotes = notes;
     }
 
-    // --- Tone.js Synth Setup ---
-    let mainSynth = null;
-    let padSynth = null;
+    // --- Tone.js Multi-Instrument Setup ---
+    let bassSynth = null;      // Low drone following smoothed signal
+    let melodySynth = null;    // Main melody from raw signal
+    let arpSynth = null;       // Arpeggios triggered by activity
+    let chimeSynth = null;     // Sparkly hits on signal spikes
     let reverb = null;
     let delay = null;
-    let mainGain = null;
-    let padGain = null;
+    let bassGain = null;
+    let melodyGain = null;
+    let arpGain = null;
+    let chimeGain = null;
+    let masterGain = null;
 
     function createSynths() {
-      // Effects chain
-      reverb = new Tone.Reverb({ decay: 4, wet: 0.5 }).toDestination();
-      delay = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.25 }).connect(reverb);
+      // Master volume
+      masterGain = new Tone.Gain(0.6).toDestination();
 
-      mainGain = new Tone.Gain(0.6).connect(delay);
-      padGain = new Tone.Gain(0.3).connect(reverb);
+      // Effects
+      reverb = new Tone.Reverb({ decay: 5, wet: 0.4 }).connect(masterGain);
+      delay = new Tone.FeedbackDelay({ delayTime: '8n.', feedback: 0.25, wet: 0.2 }).connect(reverb);
+
+      // Per-layer gains
+      bassGain = new Tone.Gain(0.35).connect(reverb);
+      melodyGain = new Tone.Gain(0.5).connect(delay);
+      arpGain = new Tone.Gain(0.3).connect(delay);
+      chimeGain = new Tone.Gain(0.4).connect(reverb);
+
+      // Bass drone — deep sine, long sustain
+      bassSynth = new Tone.MonoSynth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 2, decay: 1, sustain: 0.9, release: 4 },
+        filterEnvelope: { attack: 1, decay: 0, sustain: 1, release: 2, baseFrequency: 100, octaves: 1 },
+      }).connect(bassGain);
 
       updateVoice();
       buildNotePool();
-
-      // Init note history pips
-      const container = document.getElementById('noteHistory');
-      container.innerHTML = '';
-      for (let i = 0; i < MAX_NOTE_PIPS; i++) {
-        const pip = document.createElement('div');
-        pip.className = 'note-pip';
-        container.appendChild(pip);
-      }
     }
 
     function updateVoice() {
       const voice = document.getElementById('voiceSelect').value;
 
-      // Dispose old synths
-      if (mainSynth) mainSynth.dispose();
-      if (padSynth) padSynth.dispose();
+      if (melodySynth) melodySynth.dispose();
+      if (arpSynth) arpSynth.dispose();
+      if (chimeSynth) chimeSynth.dispose();
 
       switch (voice) {
         case 'bells':
-          mainSynth = new Tone.PolySynth(Tone.FMSynth, {
-            maxPolyphony: 6,
-            voice: Tone.FMSynth,
+          melodySynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 4,
             options: {
-              harmonicity: 8,
-              modulationIndex: 2,
+              harmonicity: 8, modulationIndex: 2,
               oscillator: { type: 'sine' },
               envelope: { attack: 0.01, decay: 1.2, sustain: 0, release: 1.5 },
               modulation: { type: 'square' },
               modulationEnvelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 },
             }
-          }).connect(mainGain);
-          padSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 4,
-            voice: Tone.Synth,
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 6,
             options: {
+              harmonicity: 6, modulationIndex: 1,
               oscillator: { type: 'sine' },
-              envelope: { attack: 2, decay: 1, sustain: 0.8, release: 3 },
+              envelope: { attack: 0.005, decay: 0.6, sustain: 0, release: 0.8 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.3 },
             }
-          }).connect(padGain);
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            options: {
+              oscillator: { type: 'triangle' },
+              envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.5 },
+            }
+          }).connect(chimeGain);
           break;
 
         case 'pad':
-          mainSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 6,
-            voice: Tone.Synth,
+          melodySynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
             options: {
               oscillator: { type: 'triangle' },
               envelope: { attack: 0.8, decay: 2, sustain: 0.4, release: 3 },
             }
-          }).connect(mainGain);
-          padSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 4,
-            voice: Tone.Synth,
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
             options: {
               oscillator: { type: 'sine' },
-              envelope: { attack: 3, decay: 2, sustain: 0.6, release: 4 },
+              envelope: { attack: 0.3, decay: 1, sustain: 0.2, release: 1.5 },
             }
-          }).connect(padGain);
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.01, decay: 0.8, sustain: 0, release: 1 },
+            }
+          }).connect(chimeGain);
           break;
 
         case 'pluck':
-          mainSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 6,
-            voice: Tone.Synth,
+          melodySynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
             options: {
               oscillator: { type: 'triangle' },
               envelope: { attack: 0.005, decay: 0.4, sustain: 0, release: 0.8 },
             }
-          }).connect(mainGain);
-          padSynth = new Tone.PolySynth(Tone.Synth, {
-            maxPolyphony: 4,
-            voice: Tone.Synth,
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
             options: {
-              oscillator: { type: 'sine' },
-              envelope: { attack: 2, decay: 1, sustain: 0.5, release: 3 },
+              oscillator: { type: 'sawtooth' },
+              envelope: { attack: 0.003, decay: 0.2, sustain: 0, release: 0.4 },
             }
-          }).connect(padGain);
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 4,
+            options: {
+              harmonicity: 12, modulationIndex: 1,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.3 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 },
+            }
+          }).connect(chimeGain);
           break;
 
         case 'wind':
-          mainSynth = new Tone.PolySynth(Tone.AMSynth, {
-            maxPolyphony: 6,
-            voice: Tone.AMSynth,
+          melodySynth = new Tone.PolySynth(Tone.AMSynth, {
+            maxPolyphony: 4,
             options: {
               harmonicity: 1.5,
               oscillator: { type: 'sine' },
@@ -658,161 +1066,207 @@
               modulation: { type: 'triangle' },
               modulationEnvelope: { attack: 0.5, decay: 1, sustain: 0.5, release: 2 },
             }
-          }).connect(mainGain);
-          padSynth = new Tone.PolySynth(Tone.Synth, {
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.AMSynth, {
+            maxPolyphony: 6,
+            options: {
+              harmonicity: 2,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.2, decay: 0.8, sustain: 0.1, release: 1 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.2, decay: 0.5, sustain: 0.2, release: 0.8 },
+            }
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.Synth, {
             maxPolyphony: 4,
-            voice: Tone.Synth,
             options: {
               oscillator: { type: 'sine' },
-              envelope: { attack: 3, decay: 2, sustain: 0.7, release: 4 },
+              envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.8 },
             }
-          }).connect(padGain);
+          }).connect(chimeGain);
           break;
       }
     }
 
-    function updateScale() {
-      buildNotePool();
-    }
+    function updateScale() { buildNotePool(); }
 
     function updateVolume() {
       const vol = parseInt(document.getElementById('volumeSlider').value);
-      const db = Tone.gainToDb(vol / 100);
-      if (mainGain) mainGain.gain.rampTo(Tone.dbToGain(db), 0.1);
+      if (masterGain) masterGain.gain.rampTo(vol / 100, 0.1);
     }
 
-    // --- Music Generation ---
-    function mapSignalToNote(value) {
-      // Auto-calibrate range with some padding
+    // --- Signal to Note Mapping ---
+    function mapSignalToNote(value, octaveOffset = 0) {
       if (value < signalMin) signalMin = value;
       if (value > signalMax) signalMax = value;
 
       const range = signalMax - signalMin;
-      if (range < 0.01) return currentNotes[Math.floor(currentNotes.length / 2)];
+      if (range < 0.01 || currentNotes.length === 0) return currentNotes[Math.floor(currentNotes.length / 2)] || 'C4';
 
-      // Normalize 0-1
-      const normalized = (value - signalMin) / range;
-      const clamped = Math.max(0, Math.min(1, normalized));
-
-      // Map to note index
-      const noteIndex = Math.floor(clamped * (currentNotes.length - 1));
-      return currentNotes[noteIndex];
+      const normalized = Math.max(0, Math.min(1, (value - signalMin) / range));
+      const notesPerOctave = currentNotes.length / 4;
+      const baseIndex = Math.floor(normalized * (currentNotes.length - 1));
+      const index = Math.max(0, Math.min(currentNotes.length - 1, baseIndex + Math.floor(octaveOffset * notesPerOctave)));
+      return currentNotes[index];
     }
 
-    function getNoteTiming() {
-      // Activity drives note density
-      // Low activity (0-5%): one note every 1-2 seconds
-      // Medium (5-20%): every 300-800ms
-      // High (20%+): every 100-300ms
-      if (currentActivity < 2) return 2000;
-      if (currentActivity < 5) return 1200;
-      if (currentActivity < 10) return 600;
-      if (currentActivity < 20) return 350;
-      return 150;
-    }
+    // --- Multi-Layer Music Engine ---
+    let lastBassNote = '';
+    let lastBassTime = 0;
+    let lastMelodyTime = 0;
+    let lastArpTime = 0;
+    let lastChimeTime = 0;
+    let arpSequenceIndex = 0;
+    let prevRawForSpike = 0;
+    let layerActivity = { bass: 0, melody: 0, arp: 0, chime: 0 };
+    let layerMuted = { bass: false, melody: false, arp: false, chime: false };
 
-    function getNoteVelocity() {
-      // Activity maps to velocity (0-1)
-      const base = 0.15;
-      const activityBoost = Math.min(currentActivity / 30, 0.85);
-      return base + activityBoost;
-    }
+    function toggleLayer(layer) {
+      layerMuted[layer] = !layerMuted[layer];
+      const row = document.getElementById(layer + 'Row');
+      const label = row.querySelector('.layer-toggle');
 
-    function getNoteDuration() {
-      // Higher activity = shorter, more percussive notes
-      if (currentActivity > 15) return '16n';
-      if (currentActivity > 8) return '8n';
-      if (currentActivity > 3) return '4n';
-      return '2n';
-    }
-
-    // Pad drone — plays root + fifth, updates slowly
-    let lastPadUpdate = 0;
-    let currentPadNotes = [];
-
-    function updatePadDrone() {
-      const now = Date.now();
-      if (now - lastPadUpdate < 4000) return; // Update every 4s
-      lastPadUpdate = now;
-
-      // Release old pad notes
-      if (padSynth && currentPadNotes.length > 0) {
-        padSynth.releaseAll();
-      }
-
-      // Play root area based on smoothed signal
-      const noteIndex = Math.floor(
-        ((currentSmoothed - signalMin) / (signalMax - signalMin || 1)) *
-        (currentNotes.length / 3)
-      );
-      const safeIndex = Math.max(0, Math.min(noteIndex, currentNotes.length - 1));
-
-      // Root + a note a few steps up for harmony
-      const root = currentNotes[safeIndex];
-      const harmonyIndex = Math.min(safeIndex + 2, currentNotes.length - 1);
-      const harmony = currentNotes[harmonyIndex];
-
-      currentPadNotes = [root, harmony];
-      if (padSynth) {
-        padSynth.triggerAttack(currentPadNotes, undefined, 0.15);
+      if (layerMuted[layer]) {
+        row.classList.add('muted');
+        label.classList.add('muted');
+        // Silence the layer immediately
+        if (layer === 'bass' && bassSynth) bassSynth.triggerRelease();
+        if (layer === 'melody' && melodySynth) melodySynth.releaseAll();
+        if (layer === 'arp' && arpSynth) arpSynth.releaseAll();
+        if (layer === 'chime' && chimeSynth) chimeSynth.releaseAll();
+      } else {
+        row.classList.remove('muted');
+        label.classList.remove('muted');
       }
     }
 
-    function playNote() {
-      if (!musicPlaying || !mainSynth) return;
+    function updateLayerDisplay(layer, value, note) {
+      const bar = document.getElementById(layer + 'Bar');
+      const noteEl = document.getElementById(layer + 'Note');
+      if (bar) bar.style.width = Math.min(100, value) + '%';
+      if (noteEl && note) noteEl.textContent = note;
+      layerActivity[layer] = value;
+    }
 
+    // Layer 1: Bass drone — follows smoothed signal, updates every ~5s
+    function playBass() {
+      if (!bassSynth || layerMuted.bass) return;
       const now = Date.now();
-      const interval = getNoteTiming();
+      const beatInterval = 60000 / detectedBPM;
+      if (now - lastBassTime < beatInterval * 4) return; // Every 4 beats
+      lastBassTime = now;
 
-      if (now - lastNoteTime < interval) return;
-      lastNoteTime = now;
+      // Map smoothed to low octave
+      const note = mapSignalToNote(currentSmoothed, -1);
+      if (note === lastBassNote) return;
+
+      bassSynth.triggerRelease();
+      setTimeout(() => {
+        bassSynth.triggerAttack(note, undefined, 0.3);
+        lastBassNote = note;
+        updateLayerDisplay('bass', 80, note);
+        setTimeout(() => updateLayerDisplay('bass', 20, note), 1000);
+      }, 50);
+    }
+
+    // Layer 2: Melody — raw signal drives note, tempo drives rhythm
+    function playMelody() {
+      if (!melodySynth || layerMuted.melody) return;
+      const now = Date.now();
+      const beatInterval = 60000 / detectedBPM;
+
+      // Play on beat, skip some when calm
+      if (now - lastMelodyTime < beatInterval) return;
+      if (currentActivity < 2 && Math.random() > 0.3) return;
+      lastMelodyTime = now;
 
       const note = mapSignalToNote(currentRawValue);
-      const velocity = getNoteVelocity();
-      const duration = getNoteDuration();
+      const velocity = 0.15 + Math.min(currentActivity / 25, 0.7);
+      const duration = currentActivity > 10 ? '8n' : currentActivity > 5 ? '4n' : '2n';
 
-      // Sometimes skip notes when very calm for organic feel
-      if (currentActivity < 2 && Math.random() > 0.4) return;
+      melodySynth.triggerAttackRelease(note, duration, undefined, velocity);
+      updateLayerDisplay('melody', velocity * 100, note);
+      setTimeout(() => updateLayerDisplay('melody', 10, note), 500);
 
-      // Occasionally add a second harmony note
-      const addHarmony = currentActivity > 10 && Math.random() > 0.6;
-
-      mainSynth.triggerAttackRelease(note, duration, undefined, velocity);
-
-      if (addHarmony) {
-        const noteIdx = currentNotes.indexOf(note);
-        const harmIdx = Math.min(noteIdx + 2, currentNotes.length - 1);
-        mainSynth.triggerAttackRelease(currentNotes[harmIdx], duration, undefined, velocity * 0.5);
-      }
-
-      // Update display
-      const noteDisplay = document.getElementById('currentNote');
-      noteDisplay.textContent = note;
-      noteDisplay.classList.add('playing');
-      setTimeout(() => noteDisplay.classList.remove('playing'), 300);
-
-      // Update pip history
-      noteHistoryList.push(note);
-      if (noteHistoryList.length > MAX_NOTE_PIPS) noteHistoryList.shift();
-
-      const pips = document.querySelectorAll('.note-pip');
-      pips.forEach((pip, i) => {
-        if (i < noteHistoryList.length) {
-          pip.classList.add('active');
-          // Fade older pips
-          const age = (noteHistoryList.length - i) / noteHistoryList.length;
-          pip.style.opacity = 0.3 + (1 - age) * 0.7;
-        } else {
-          pip.classList.remove('active');
-          pip.style.opacity = 1;
-        }
-      });
-
-      // Update pad drone
-      updatePadDrone();
+      pulseBeat();
     }
 
-    // Music loop — runs independently of data events
+    // Layer 3: Arpeggios — triggered by activity, plays broken chords
+    function playArpeggio() {
+      if (!arpSynth || layerMuted.arp || currentActivity < 5) {
+        updateLayerDisplay('arp', 0, '--');
+        return;
+      }
+      const now = Date.now();
+      const beatInterval = 60000 / detectedBPM;
+      const arpSpeed = beatInterval / 4; // 16th notes
+
+      if (now - lastArpTime < arpSpeed) return;
+      lastArpTime = now;
+
+      // Build chord tones from current position
+      const baseIndex = Math.floor(
+        Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)))
+        * (currentNotes.length * 0.6)
+      );
+      const chordTones = [0, 2, 4, 7].map(offset =>
+        currentNotes[Math.min(baseIndex + offset, currentNotes.length - 1)]
+      );
+
+      // Cycle through chord tones
+      const note = chordTones[arpSequenceIndex % chordTones.length];
+      arpSequenceIndex++;
+
+      // Activity controls arp intensity
+      const velocity = 0.1 + Math.min(currentActivity / 40, 0.5);
+      arpSynth.triggerAttackRelease(note, '16n', undefined, velocity);
+
+      updateLayerDisplay('arp', (currentActivity / 30) * 100, note);
+    }
+
+    // Layer 4: Chimes — triggered by sudden signal spikes
+    function playChime() {
+      if (!chimeSynth || layerMuted.chime) return;
+      const now = Date.now();
+      if (now - lastChimeTime < 500) return; // Max 2 chimes/sec
+
+      // Detect spike: rapid change in raw signal
+      const delta = Math.abs(currentRawValue - prevRawForSpike);
+      const range = signalMax - signalMin || 1;
+      const spikeThreshold = range * 0.15; // 15% of range = spike
+
+      if (delta > spikeThreshold) {
+        lastChimeTime = now;
+
+        // High octave sparkle
+        const note = mapSignalToNote(currentRawValue, 1);
+        const velocity = Math.min(0.3 + (delta / range), 0.8);
+
+        chimeSynth.triggerAttackRelease(note, '16n', undefined, velocity);
+
+        // Sometimes add a second chime for sparkle
+        if (delta > spikeThreshold * 2 && currentNotes.length > 2) {
+          const note2 = mapSignalToNote(currentRawValue, 1.5);
+          setTimeout(() => {
+            chimeSynth.triggerAttackRelease(note2, '32n', undefined, velocity * 0.5);
+          }, 80);
+        }
+
+        updateLayerDisplay('chime', velocity * 100, note);
+        setTimeout(() => updateLayerDisplay('chime', 0, '--'), 300);
+      }
+
+      prevRawForSpike = currentRawValue;
+    }
+
+    function musicTick() {
+      if (!musicPlaying) return;
+      playBass();
+      playMelody();
+      playArpeggio();
+      playChime();
+    }
+
     let musicLoop = null;
 
     async function toggleMusic() {
@@ -820,26 +1274,127 @@
 
       if (!musicPlaying) {
         await Tone.start();
-        if (!mainSynth) createSynths();
+        if (!melodySynth) createSynths();
 
         musicPlaying = true;
         btn.textContent = 'Stop';
         btn.classList.add('playing');
 
-        // Run playNote check frequently
-        musicLoop = setInterval(playNote, 50);
+        musicLoop = setInterval(musicTick, 50);
       } else {
         musicPlaying = false;
         btn.textContent = 'Play';
         btn.classList.remove('playing');
 
         if (musicLoop) clearInterval(musicLoop);
-        if (mainSynth) mainSynth.releaseAll();
-        if (padSynth) padSynth.releaseAll();
+        if (bassSynth) bassSynth.triggerRelease();
+        if (melodySynth) melodySynth.releaseAll();
+        if (arpSynth) arpSynth.releaseAll();
+        if (chimeSynth) chimeSynth.releaseAll();
 
-        document.getElementById('currentNote').textContent = '--';
-        document.getElementById('currentNote').classList.remove('playing');
+        ['bass', 'melody', 'arp', 'chime'].forEach(l => updateLayerDisplay(l, 0, '--'));
+        document.getElementById('tempoValue').textContent = '--';
+        document.getElementById('tempoSource').textContent = 'detecting...';
+
+        // Stop recording if active
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          stopRecording();
+        }
       }
+    }
+
+    // --- Browser Recording ---
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recStartTime = 0;
+    let recTimerInterval = null;
+
+    function toggleRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    function startRecording() {
+      if (!musicPlaying) {
+        // Auto-start music if not playing
+        toggleMusic();
+      }
+
+      // Tap the Tone.js audio context destination
+      const dest = Tone.getContext().rawContext.createMediaStreamDestination();
+      Tone.getDestination().connect(dest);
+
+      const options = { mimeType: 'audio/webm;codecs=opus' };
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'audio/webm';
+      }
+
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(dest.stream, options);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: options.mimeType });
+        const url = URL.createObjectURL(blob);
+        const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+
+        // Create download link in the controls bar
+        const existing = document.getElementById('recDownload');
+        if (existing) existing.remove();
+
+        const link = document.createElement('a');
+        link.id = 'recDownload';
+        link.href = url;
+        link.download = `plantpulse-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.webm`;
+        link.className = 'download-link';
+        link.textContent = `Save (${sizeMB} MB)`;
+        document.querySelector('.music-playback').appendChild(link);
+      };
+
+      mediaRecorder.start(1000); // Collect data every second
+      recStartTime = Date.now();
+
+      const btn = document.getElementById('recBtn');
+      btn.classList.add('recording');
+      btn.textContent = 'Stop Rec';
+
+      // Remove old download link
+      const existing = document.getElementById('recDownload');
+      if (existing) existing.remove();
+
+      // Show timer
+      const timer = document.createElement('span');
+      timer.id = 'recTimer';
+      timer.className = 'rec-timer';
+      timer.textContent = '0:00';
+      btn.after(timer);
+
+      recTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+        const min = Math.floor(elapsed / 60);
+        const sec = (elapsed % 60).toString().padStart(2, '0');
+        document.getElementById('recTimer').textContent = ` ${min}:${sec}`;
+      }, 1000);
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+
+      const btn = document.getElementById('recBtn');
+      btn.classList.remove('recording');
+      btn.textContent = 'Rec';
+
+      clearInterval(recTimerInterval);
+      const timer = document.getElementById('recTimer');
+      if (timer) timer.remove();
     }
 
     // --- Chart Setup ---
@@ -960,6 +1515,7 @@
         clean: true,
         username: PLANTPULSE_CONFIG.mqttUsername,
         password: PLANTPULSE_CONFIG.mqttPassword,
+        protocolVersion: 4,
       });
 
       mqttClient.on('connect', () => {
@@ -1048,6 +1604,7 @@
         rawHistory.push({ x: now, y: avgMv });
         updateRawStats(avgMv);
         currentRawValue = avgMv;
+        updateTempo(avgMv);
         document.getElementById('rawValue').innerHTML =
           `${avgMv.toFixed(3)} <span class="unit">mV</span>`;
 
@@ -1146,8 +1703,16 @@
       trimData(smoothedHistory, cutoff);
       chart.update('none');
     }
-    // --- Auto-connect on page load ---
-    window.addEventListener('load', () => {
+    // --- Load plant config and auto-connect ---
+    window.addEventListener('load', async () => {
+      try {
+        const res = await fetch('config.json');
+        if (res.ok) {
+          const config = await res.json();
+          document.getElementById('plantName').textContent = config.plantName || '--';
+          document.getElementById('plantType').textContent = config.plantType || '';
+        }
+      } catch (e) { /* config.json optional */ }
       connect();
     });
   </script>

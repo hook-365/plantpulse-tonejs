@@ -6,6 +6,8 @@ PlantPulse reads microvolt-level bioelectrical signals from plant leaves using a
 
 ![PlantPulse Dashboard](docs/screenshot.png)
 
+**[Live Demo](https://plantpulse.hook.technology)** — listen to a hibiscus tree make music in real-time
+
 ## How It Works
 
 ```

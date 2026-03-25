@@ -8,3 +8,4 @@ services:
     volumes:
       - ./index.html:/usr/share/nginx/html/index.html:ro
       - ./logo.svg:/usr/share/nginx/html/logo.svg:ro
+      - ./config.json:/usr/share/nginx/html/config.json:ro
