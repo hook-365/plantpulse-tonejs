@@ -751,12 +751,15 @@
           <option value="B">B</option>
         </select>
         <div class="divider"></div>
-        <label>Voice:</label>
+        <label>Mood:</label>
         <select id="voiceSelect" onchange="updateVoice()">
           <option value="bells" selected>Bells</option>
           <option value="pad">Soft Pad</option>
           <option value="pluck">Pluck</option>
           <option value="wind">Wind</option>
+          <option value="glass">Glass</option>
+          <option value="ethereal">Ethereal</option>
+          <option value="organic">Organic</option>
         </select>
         <div class="divider"></div>
         <label>Vol:</label>
@@ -956,13 +959,6 @@
       arpGain = new Tone.Gain(0.3).connect(delay);
       chimeGain = new Tone.Gain(0.4).connect(reverb);
 
-      // Bass drone — deep sine, long sustain
-      bassSynth = new Tone.MonoSynth({
-        oscillator: { type: 'sine' },
-        envelope: { attack: 2, decay: 1, sustain: 0.9, release: 4 },
-        filterEnvelope: { attack: 1, decay: 0, sustain: 1, release: 2, baseFrequency: 100, octaves: 1 },
-      }).connect(bassGain);
-
       updateVoice();
       buildNotePool();
     }
@@ -970,12 +966,19 @@
     function updateVoice() {
       const voice = document.getElementById('voiceSelect').value;
 
+      // Dispose old synths
+      if (bassSynth) bassSynth.dispose();
       if (melodySynth) melodySynth.dispose();
       if (arpSynth) arpSynth.dispose();
       if (chimeSynth) chimeSynth.dispose();
 
       switch (voice) {
         case 'bells':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sine' },
+            envelope: { attack: 2, decay: 1, sustain: 0.9, release: 4 },
+            filterEnvelope: { attack: 1, decay: 0, sustain: 1, release: 2, baseFrequency: 80, octaves: 1 },
+          }).connect(bassGain);
           melodySynth = new Tone.PolySynth(Tone.FMSynth, {
             maxPolyphony: 4,
             options: {
@@ -1006,6 +1009,11 @@
           break;
 
         case 'pad':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 3, decay: 2, sustain: 0.8, release: 5 },
+            filterEnvelope: { attack: 2, decay: 0, sustain: 1, release: 3, baseFrequency: 60, octaves: 1.5 },
+          }).connect(bassGain);
           melodySynth = new Tone.PolySynth(Tone.Synth, {
             maxPolyphony: 4,
             options: {
@@ -1030,6 +1038,11 @@
           break;
 
         case 'pluck':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sawtooth' },
+            envelope: { attack: 0.1, decay: 0.8, sustain: 0.6, release: 2 },
+            filterEnvelope: { attack: 0.05, decay: 0.5, sustain: 0.3, release: 1, baseFrequency: 120, octaves: 2 },
+          }).connect(bassGain);
           melodySynth = new Tone.PolySynth(Tone.Synth, {
             maxPolyphony: 4,
             options: {
@@ -1057,6 +1070,11 @@
           break;
 
         case 'wind':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sine' },
+            envelope: { attack: 3, decay: 2, sustain: 0.7, release: 5 },
+            filterEnvelope: { attack: 2, decay: 1, sustain: 0.5, release: 3, baseFrequency: 50, octaves: 2 },
+          }).connect(bassGain);
           melodySynth = new Tone.PolySynth(Tone.AMSynth, {
             maxPolyphony: 4,
             options: {
@@ -1082,6 +1100,114 @@
             options: {
               oscillator: { type: 'sine' },
               envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.8 },
+            }
+          }).connect(chimeGain);
+          break;
+
+        case 'glass':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sine' },
+            envelope: { attack: 1.5, decay: 1, sustain: 0.8, release: 3 },
+            filterEnvelope: { attack: 0.5, decay: 0, sustain: 1, release: 2, baseFrequency: 150, octaves: 1 },
+          }).connect(bassGain);
+          melodySynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 4,
+            options: {
+              harmonicity: 14, modulationIndex: 4,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 1.2 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
+            }
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 6,
+            options: {
+              harmonicity: 10, modulationIndex: 3,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.3 },
+            }
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 4,
+            options: {
+              harmonicity: 18, modulationIndex: 5,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.4 },
+              modulation: { type: 'sine' },
+              modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.2 },
+            }
+          }).connect(chimeGain);
+          break;
+
+        case 'ethereal': {
+          // Extra wet reverb for dreamy wash
+          const ethReverb = new Tone.Reverb({ decay: 10, wet: 0.85 }).connect(masterGain);
+          const ethChorus = new Tone.Chorus({ frequency: 0.3, delayTime: 15, depth: 0.8, wet: 0.6 }).connect(ethReverb);
+          const ethDelay = new Tone.FeedbackDelay({ delayTime: '4n.', feedback: 0.4, wet: 0.35 }).connect(ethReverb);
+
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'sine' },
+            envelope: { attack: 6, decay: 4, sustain: 0.9, release: 8 },
+            filterEnvelope: { attack: 4, decay: 0, sustain: 1, release: 5, baseFrequency: 30, octaves: 1 },
+          }).connect(ethReverb);
+          melodySynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            options: {
+              oscillator: { type: 'fatsine', spread: 30, count: 3 },
+              envelope: { attack: 3, decay: 4, sustain: 0.6, release: 8 },
+            }
+          }).connect(ethChorus);
+          arpSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 1.5, decay: 3, sustain: 0.3, release: 5 },
+            }
+          }).connect(ethDelay);
+          // Ethereal chimes: very quiet, heavily filtered, slow fade-in
+          const ethChimeFilter = new Tone.Filter({ frequency: 2000, type: 'lowpass', rolloff: -24 }).connect(ethReverb);
+          const ethChimeGain = new Tone.Gain(0.15).connect(ethChimeFilter);
+          chimeSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 3,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 1.5, decay: 4, sustain: 0, release: 6 },
+            }
+          }).connect(ethChimeGain);
+          break;
+        }
+
+        case 'organic':
+          bassSynth = new Tone.MonoSynth({
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 1, decay: 1.5, sustain: 0.7, release: 3 },
+            filterEnvelope: { attack: 0.8, decay: 0.5, sustain: 0.6, release: 2, baseFrequency: 90, octaves: 2.5 },
+          }).connect(bassGain);
+          melodySynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            options: {
+              oscillator: { type: 'fatsawtooth', spread: 20, count: 3 },
+              envelope: { attack: 0.1, decay: 0.8, sustain: 0.2, release: 1.5 },
+            }
+          }).connect(melodyGain);
+          arpSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
+            options: {
+              oscillator: { type: 'fattriangle', spread: 15, count: 3 },
+              envelope: { attack: 0.05, decay: 0.5, sustain: 0.1, release: 0.8 },
+            }
+          }).connect(arpGain);
+          chimeSynth = new Tone.PolySynth(Tone.AMSynth, {
+            maxPolyphony: 4,
+            options: {
+              harmonicity: 2.5,
+              oscillator: { type: 'triangle' },
+              envelope: { attack: 0.01, decay: 0.4, sustain: 0, release: 0.6 },
+              modulation: { type: 'triangle' },
+              modulationEnvelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.4 },
             }
           }).connect(chimeGain);
           break;
@@ -1177,7 +1303,7 @@
 
       // Play on beat, skip some when calm
       if (now - lastMelodyTime < beatInterval) return;
-      if (currentActivity < 2 && Math.random() > 0.3) return;
+      if (currentActivity < 0.3 && Math.random() > 0.5) return;
       lastMelodyTime = now;
 
       const note = mapSignalToNote(currentRawValue);
@@ -1193,7 +1319,7 @@
 
     // Layer 3: Arpeggios — triggered by activity, plays broken chords
     function playArpeggio() {
-      if (!arpSynth || layerMuted.arp || currentActivity < 5) {
+      if (!arpSynth || layerMuted.arp || currentActivity < 0.5) {
         updateLayerDisplay('arp', 0, '--');
         return;
       }
@@ -1218,7 +1344,7 @@
       arpSequenceIndex++;
 
       // Activity controls arp intensity
-      const velocity = 0.1 + Math.min(currentActivity / 40, 0.5);
+      const velocity = 0.15 + Math.min(currentActivity / 10, 0.5);
       arpSynth.triggerAttackRelease(note, '16n', undefined, velocity);
 
       updateLayerDisplay('arp', (currentActivity / 30) * 100, note);
@@ -1233,7 +1359,7 @@
       // Detect spike: rapid change in raw signal
       const delta = Math.abs(currentRawValue - prevRawForSpike);
       const range = signalMax - signalMin || 1;
-      const spikeThreshold = range * 0.15; // 15% of range = spike
+      const spikeThreshold = range * 0.04; // 4% of range = spike
 
       if (delta > spikeThreshold) {
         lastChimeTime = now;
