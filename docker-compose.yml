@@ -1,0 +1,10 @@
+services:
+  plantpulse:
+    image: nginx:alpine
+    container_name: plantpulse
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8286:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./logo.svg:/usr/share/nginx/html/logo.svg:ro

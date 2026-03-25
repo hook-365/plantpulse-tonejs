@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlantPulse</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tone@14"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0c111d;
+      color: #e8ecf4;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background glow (Librarian signature) */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(52,211,153,0.10) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(110,168,254,0.07) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 50% at 10% 40%, rgba(212,149,106,0.05) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    header {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid transparent;
+      border-image: linear-gradient(90deg, rgba(52,211,153,0.3) 0%, rgba(110,168,254,0.35) 50%, rgba(167,139,250,0.3) 100%) 1;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .logo img {
+      height: 36px;
+      width: auto;
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #8896b0;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #4d5d78;
+      transition: background 0.3s;
+    }
+
+    .status-dot.connected { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,0.5); }
+    .status-dot.error { background: #f87171; box-shadow: 0 0 8px rgba(248,113,113,0.5); }
+
+    .stats-bar {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      padding: 24px 32px;
+    }
+
+    .stat-card {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+      padding: 16px 20px;
+      transition: border-color 0.2s;
+    }
+
+    .stat-card:hover {
+      border-color: #2a3d5e;
+    }
+
+    .stat-card .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #8896b0;
+      margin-bottom: 6px;
+    }
+
+    .stat-card .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #e8ecf4;
+    }
+
+    .stat-card .value .unit {
+      font-size: 14px;
+      font-weight: 400;
+      color: #4d5d78;
+    }
+
+    .chart-container {
+      position: relative;
+      z-index: 1;
+      padding: 20px 32px;
+    }
+
+    .chart-wrapper {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+    }
+
+    .chart-wrapper canvas {
+      width: 100% !important;
+    }
+
+    .controls {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      gap: 10px;
+      padding: 0 32px 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button {
+      background: #1a2540;
+      color: #e8ecf4;
+      border: 1px solid #1e2d4a;
+      border-radius: 8px;
+      padding: 8px 18px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    button:hover { background: #283a5c; border-color: #6ea8fe; }
+    button.active { background: linear-gradient(135deg, #34d399, #6ea8fe); border-color: transparent; color: #0c111d; font-weight: 600; }
+
+    .window-selector {
+      display: flex;
+      gap: 4px;
+      background: #0a0f1a;
+      border: 1px solid #1e2d4a;
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .window-selector button {
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+    }
+
+    .activity-bar-container {
+      position: relative;
+      z-index: 1;
+      padding: 0 32px 20px;
+    }
+
+    .activity-bar-wrapper {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+
+    .activity-bar-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #8896b0;
+      margin-bottom: 10px;
+    }
+
+    .activity-bar {
+      height: 24px;
+      background: #1a2540;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .activity-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #059669, #34d399, #6ea8fe);
+      border-radius: 12px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    .activity-bar-value {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+
+    /* --- Music Controls --- */
+    .music-section {
+      position: relative;
+      z-index: 1;
+      padding: 0 32px 20px;
+    }
+
+    .music-wrapper {
+      background: #141c2e;
+      border: 1px solid #1e2d4a;
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .music-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .music-header h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #8896b0;
+      font-weight: 400;
+    }
+
+    .music-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .music-controls label {
+      font-size: 12px;
+      color: #8896b0;
+    }
+
+    .music-controls select {
+      background: #1a2540;
+      color: #e8ecf4;
+      border: 1px solid #1e2d4a;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .music-controls select:focus {
+      border-color: #6ea8fe;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(110,168,254,0.15);
+    }
+
+    .music-controls input[type="range"] {
+      -webkit-appearance: none;
+      background: #1a2540;
+      height: 6px;
+      border-radius: 3px;
+      outline: none;
+      width: 100px;
+    }
+
+    .music-controls input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #6ea8fe;
+      cursor: pointer;
+    }
+
+    .note-display {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #1e2d4a;
+    }
+
+    .current-note {
+      font-size: 48px;
+      font-weight: 700;
+      color: #34d399;
+      min-width: 120px;
+      text-align: center;
+      transition: color 0.2s;
+    }
+
+    .current-note.playing {
+      color: #6ea8fe;
+      text-shadow: 0 0 20px rgba(110,168,254,0.5);
+    }
+
+    .note-history {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+
+    .note-pip {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #1e2d4a;
+      transition: all 0.3s;
+    }
+
+    .note-pip.active {
+      background: #6ea8fe;
+      box-shadow: 0 0 6px rgba(110,168,254,0.5);
+    }
+
+    #musicBtn {
+      font-size: 15px;
+      padding: 10px 24px;
+    }
+
+    #musicBtn.playing {
+      background: linear-gradient(135deg, rgba(52,211,153,0.2), rgba(110,168,254,0.2));
+      border-color: #34d399;
+      color: #34d399;
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 5px rgba(52,211,153,0.15); }
+      50% { box-shadow: 0 0 20px rgba(52,211,153,0.3); }
+    }
+
+    .divider {
+      width: 1px;
+      height: 28px;
+      background: #1e2d4a;
+      margin: 0 6px;
+    }
+
+    /* --- Scrollbar (Librarian) --- */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0c111d; }
+    ::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2a3d5e; }
+    ::selection { background: rgba(110,168,254,0.3); color: #fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <img src="logo.svg" alt="PlantPulse">
+    </div>
+    <div class="connection-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+      <button id="connectBtn" onclick="toggleConnection()" style="margin-left: 4px; padding: 4px 12px; font-size: 11px;">Disconnect</button>
+    </div>
+  </header>
+
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="label">Raw Signal</div>
+      <div class="value" id="rawValue">-- <span class="unit">mV</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Smoothed</div>
+      <div class="value" id="smoothedValue">-- <span class="unit">mV</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Min / Max</div>
+      <div class="value" id="minMaxValue">-- <span class="unit">mV</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Avg (60s)</div>
+      <div class="value" id="avgValue">-- <span class="unit">mV</span></div>
+    </div>
+  </div>
+
+  <div class="activity-bar-container">
+    <div class="activity-bar-wrapper">
+      <div class="activity-bar-label">Plant Activity</div>
+      <div class="activity-bar">
+        <div class="activity-bar-fill" id="activityFill"></div>
+        <div class="activity-bar-value" id="activityValue">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Music Section -->
+  <div class="music-section">
+    <div class="music-wrapper">
+      <div class="music-header">
+        <h2>Sonification</h2>
+        <div class="music-controls">
+          <label>Scale:</label>
+          <select id="scaleSelect" onchange="updateScale()">
+            <option value="pentatonic" selected>Pentatonic</option>
+            <option value="major">Major</option>
+            <option value="minor">Natural Minor</option>
+            <option value="dorian">Dorian</option>
+            <option value="mixolydian">Mixolydian</option>
+            <option value="wholeTone">Whole Tone</option>
+          </select>
+          <label>Root:</label>
+          <select id="rootSelect" onchange="updateScale()">
+            <option value="C">C</option>
+            <option value="D">D</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+            <option value="G" selected>G</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+          </select>
+          <div class="divider"></div>
+          <label>Voice:</label>
+          <select id="voiceSelect" onchange="updateVoice()">
+            <option value="bells" selected>Bells</option>
+            <option value="pad">Soft Pad</option>
+            <option value="pluck">Pluck</option>
+            <option value="wind">Wind</option>
+          </select>
+          <div class="divider"></div>
+          <label>Vol:</label>
+          <input type="range" id="volumeSlider" min="0" max="100" value="60" oninput="updateVolume()">
+        </div>
+      </div>
+      <div class="note-display">
+        <div class="current-note" id="currentNote">--</div>
+        <div class="note-history" id="noteHistory">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="musicBtn" onclick="toggleMusic()">Play</button>
+    <button id="pauseBtn" onclick="togglePause()">Pause</button>
+    <button onclick="clearChart()">Clear</button>
+    <div class="window-selector">
+      <button class="active" onclick="setWindow(30, this)">30s</button>
+      <button onclick="setWindow(60, this)">1m</button>
+      <button onclick="setWindow(120, this)">2m</button>
+      <button onclick="setWindow(300, this)">5m</button>
+    </div>
+  </div>
+
+  <div class="chart-container">
+    <div class="chart-wrapper">
+      <canvas id="plantChart" height="350"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // --- State ---
+    // MQTT client (replaces EventSource)
+    let paused = false;
+    let windowSeconds = 30;
+    let rawHistory = [];
+    let smoothedHistory = [];
+
+    // Stats tracking
+    let rawMin = Infinity;
+    let rawMax = -Infinity;
+    let rawSum = 0;
+    let rawCount = 0;
+
+    // Client-side signal processing (all computation in browser)
+    let emaSmoothed = 0;
+    let emaInitialized = false;
+    let lastRawForActivity = 0;
+    const EMA_ALPHA = 0.1;
+
+    // Sliding window average (replaces ESP32 filter)
+    const RAW_WINDOW_SIZE = 5;
+    let rawWindow = [];
+
+    // --- Music State ---
+    let musicPlaying = false;
+    let currentRawValue = 0;
+    let currentActivity = 0;
+    let currentSmoothed = 0;
+    let lastNoteTime = 0;
+    let lastNote = '';
+    let noteHistoryList = [];
+    const MAX_NOTE_PIPS = 40;
+
+    // Signal range (auto-calibrates from observed data)
+    let signalMin = -3;
+    let signalMax = 3;
+
+    // Scale definitions (intervals in semitones from root)
+    const SCALES = {
+      pentatonic:  [0, 2, 4, 7, 9],
+      major:       [0, 2, 4, 5, 7, 9, 11],
+      minor:       [0, 2, 3, 5, 7, 8, 10],
+      dorian:      [0, 2, 3, 5, 7, 9, 10],
+      mixolydian:  [0, 2, 4, 5, 7, 9, 10],
+      wholeTone:   [0, 2, 4, 6, 8, 10],
+    };
+
+    // Build note pool spanning multiple octaves
+    let currentNotes = [];
+
+    function buildNotePool() {
+      const root = document.getElementById('rootSelect').value;
+      const scaleType = document.getElementById('scaleSelect').value;
+      const intervals = SCALES[scaleType];
+
+      // Root note MIDI numbers (octave 3 as base)
+      const rootMidi = { C: 48, D: 50, E: 52, F: 53, G: 55, A: 57, B: 59 };
+      const baseMidi = rootMidi[root];
+
+      // Build 3 octaves of notes
+      const notes = [];
+      for (let octave = 0; octave < 3; octave++) {
+        for (const interval of intervals) {
+          const midi = baseMidi + (octave * 12) + interval;
+          notes.push(Tone.Frequency(midi, 'midi').toNote());
+        }
+      }
+      currentNotes = notes;
+    }
+
+    // --- Tone.js Synth Setup ---
+    let mainSynth = null;
+    let padSynth = null;
+    let reverb = null;
+    let delay = null;
+    let mainGain = null;
+    let padGain = null;
+
+    function createSynths() {
+      // Effects chain
+      reverb = new Tone.Reverb({ decay: 4, wet: 0.5 }).toDestination();
+      delay = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.25 }).connect(reverb);
+
+      mainGain = new Tone.Gain(0.6).connect(delay);
+      padGain = new Tone.Gain(0.3).connect(reverb);
+
+      updateVoice();
+      buildNotePool();
+
+      // Init note history pips
+      const container = document.getElementById('noteHistory');
+      container.innerHTML = '';
+      for (let i = 0; i < MAX_NOTE_PIPS; i++) {
+        const pip = document.createElement('div');
+        pip.className = 'note-pip';
+        container.appendChild(pip);
+      }
+    }
+
+    function updateVoice() {
+      const voice = document.getElementById('voiceSelect').value;
+
+      // Dispose old synths
+      if (mainSynth) mainSynth.dispose();
+      if (padSynth) padSynth.dispose();
+
+      switch (voice) {
+        case 'bells':
+          mainSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 6,
+            voice: Tone.FMSynth,
+            options: {
+              harmonicity: 8,
+              modulationIndex: 2,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.01, decay: 1.2, sustain: 0, release: 1.5 },
+              modulation: { type: 'square' },
+              modulationEnvelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 },
+            }
+          }).connect(mainGain);
+          padSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 2, decay: 1, sustain: 0.8, release: 3 },
+            }
+          }).connect(padGain);
+          break;
+
+        case 'pad':
+          mainSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'triangle' },
+              envelope: { attack: 0.8, decay: 2, sustain: 0.4, release: 3 },
+            }
+          }).connect(mainGain);
+          padSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 3, decay: 2, sustain: 0.6, release: 4 },
+            }
+          }).connect(padGain);
+          break;
+
+        case 'pluck':
+          mainSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 6,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'triangle' },
+              envelope: { attack: 0.005, decay: 0.4, sustain: 0, release: 0.8 },
+            }
+          }).connect(mainGain);
+          padSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 2, decay: 1, sustain: 0.5, release: 3 },
+            }
+          }).connect(padGain);
+          break;
+
+        case 'wind':
+          mainSynth = new Tone.PolySynth(Tone.AMSynth, {
+            maxPolyphony: 6,
+            voice: Tone.AMSynth,
+            options: {
+              harmonicity: 1.5,
+              oscillator: { type: 'sine' },
+              envelope: { attack: 0.5, decay: 1.5, sustain: 0.3, release: 2 },
+              modulation: { type: 'triangle' },
+              modulationEnvelope: { attack: 0.5, decay: 1, sustain: 0.5, release: 2 },
+            }
+          }).connect(mainGain);
+          padSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4,
+            voice: Tone.Synth,
+            options: {
+              oscillator: { type: 'sine' },
+              envelope: { attack: 3, decay: 2, sustain: 0.7, release: 4 },
+            }
+          }).connect(padGain);
+          break;
+      }
+    }
+
+    function updateScale() {
+      buildNotePool();
+    }
+
+    function updateVolume() {
+      const vol = parseInt(document.getElementById('volumeSlider').value);
+      const db = Tone.gainToDb(vol / 100);
+      if (mainGain) mainGain.gain.rampTo(Tone.dbToGain(db), 0.1);
+    }
+
+    // --- Music Generation ---
+    function mapSignalToNote(value) {
+      // Auto-calibrate range with some padding
+      if (value < signalMin) signalMin = value;
+      if (value > signalMax) signalMax = value;
+
+      const range = signalMax - signalMin;
+      if (range < 0.01) return currentNotes[Math.floor(currentNotes.length / 2)];
+
+      // Normalize 0-1
+      const normalized = (value - signalMin) / range;
+      const clamped = Math.max(0, Math.min(1, normalized));
+
+      // Map to note index
+      const noteIndex = Math.floor(clamped * (currentNotes.length - 1));
+      return currentNotes[noteIndex];
+    }
+
+    function getNoteTiming() {
+      // Activity drives note density
+      // Low activity (0-5%): one note every 1-2 seconds
+      // Medium (5-20%): every 300-800ms
+      // High (20%+): every 100-300ms
+      if (currentActivity < 2) return 2000;
+      if (currentActivity < 5) return 1200;
+      if (currentActivity < 10) return 600;
+      if (currentActivity < 20) return 350;
+      return 150;
+    }
+
+    function getNoteVelocity() {
+      // Activity maps to velocity (0-1)
+      const base = 0.15;
+      const activityBoost = Math.min(currentActivity / 30, 0.85);
+      return base + activityBoost;
+    }
+
+    function getNoteDuration() {
+      // Higher activity = shorter, more percussive notes
+      if (currentActivity > 15) return '16n';
+      if (currentActivity > 8) return '8n';
+      if (currentActivity > 3) return '4n';
+      return '2n';
+    }
+
+    // Pad drone — plays root + fifth, updates slowly
+    let lastPadUpdate = 0;
+    let currentPadNotes = [];
+
+    function updatePadDrone() {
+      const now = Date.now();
+      if (now - lastPadUpdate < 4000) return; // Update every 4s
+      lastPadUpdate = now;
+
+      // Release old pad notes
+      if (padSynth && currentPadNotes.length > 0) {
+        padSynth.releaseAll();
+      }
+
+      // Play root area based on smoothed signal
+      const noteIndex = Math.floor(
+        ((currentSmoothed - signalMin) / (signalMax - signalMin || 1)) *
+        (currentNotes.length / 3)
+      );
+      const safeIndex = Math.max(0, Math.min(noteIndex, currentNotes.length - 1));
+
+      // Root + a note a few steps up for harmony
+      const root = currentNotes[safeIndex];
+      const harmonyIndex = Math.min(safeIndex + 2, currentNotes.length - 1);
+      const harmony = currentNotes[harmonyIndex];
+
+      currentPadNotes = [root, harmony];
+      if (padSynth) {
+        padSynth.triggerAttack(currentPadNotes, undefined, 0.15);
+      }
+    }
+
+    function playNote() {
+      if (!musicPlaying || !mainSynth) return;
+
+      const now = Date.now();
+      const interval = getNoteTiming();
+
+      if (now - lastNoteTime < interval) return;
+      lastNoteTime = now;
+
+      const note = mapSignalToNote(currentRawValue);
+      const velocity = getNoteVelocity();
+      const duration = getNoteDuration();
+
+      // Sometimes skip notes when very calm for organic feel
+      if (currentActivity < 2 && Math.random() > 0.4) return;
+
+      // Occasionally add a second harmony note
+      const addHarmony = currentActivity > 10 && Math.random() > 0.6;
+
+      mainSynth.triggerAttackRelease(note, duration, undefined, velocity);
+
+      if (addHarmony) {
+        const noteIdx = currentNotes.indexOf(note);
+        const harmIdx = Math.min(noteIdx + 2, currentNotes.length - 1);
+        mainSynth.triggerAttackRelease(currentNotes[harmIdx], duration, undefined, velocity * 0.5);
+      }
+
+      // Update display
+      const noteDisplay = document.getElementById('currentNote');
+      noteDisplay.textContent = note;
+      noteDisplay.classList.add('playing');
+      setTimeout(() => noteDisplay.classList.remove('playing'), 300);
+
+      // Update pip history
+      noteHistoryList.push(note);
+      if (noteHistoryList.length > MAX_NOTE_PIPS) noteHistoryList.shift();
+
+      const pips = document.querySelectorAll('.note-pip');
+      pips.forEach((pip, i) => {
+        if (i < noteHistoryList.length) {
+          pip.classList.add('active');
+          // Fade older pips
+          const age = (noteHistoryList.length - i) / noteHistoryList.length;
+          pip.style.opacity = 0.3 + (1 - age) * 0.7;
+        } else {
+          pip.classList.remove('active');
+          pip.style.opacity = 1;
+        }
+      });
+
+      // Update pad drone
+      updatePadDrone();
+    }
+
+    // Music loop — runs independently of data events
+    let musicLoop = null;
+
+    async function toggleMusic() {
+      const btn = document.getElementById('musicBtn');
+
+      if (!musicPlaying) {
+        await Tone.start();
+        if (!mainSynth) createSynths();
+
+        musicPlaying = true;
+        btn.textContent = 'Stop';
+        btn.classList.add('playing');
+
+        // Run playNote check frequently
+        musicLoop = setInterval(playNote, 50);
+      } else {
+        musicPlaying = false;
+        btn.textContent = 'Play';
+        btn.classList.remove('playing');
+
+        if (musicLoop) clearInterval(musicLoop);
+        if (mainSynth) mainSynth.releaseAll();
+        if (padSynth) padSynth.releaseAll();
+
+        document.getElementById('currentNote').textContent = '--';
+        document.getElementById('currentNote').classList.remove('playing');
+      }
+    }
+
+    // --- Chart Setup ---
+    const ctx = document.getElementById('plantChart').getContext('2d');
+
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'Raw Signal (mV)',
+            data: rawHistory,
+            borderColor: '#34d399',
+            backgroundColor: 'rgba(52, 211, 153, 0.06)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.3,
+            fill: true,
+            yAxisID: 'y',
+          },
+          {
+            label: 'Smoothed (mV)',
+            data: smoothedHistory,
+            borderColor: '#d4956a',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.4,
+            fill: false,
+            yAxisID: 'y',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {
+          mode: 'index',
+          intersect: false,
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: {
+              unit: 'second',
+              displayFormats: { second: 'HH:mm:ss' },
+            },
+            grid: { color: '#1e2d4a' },
+            ticks: { color: '#8896b0', font: { family: 'SF Mono, monospace', size: 11 } },
+          },
+          y: {
+            position: 'left',
+            title: { display: true, text: 'mV', color: '#8896b0' },
+            grid: { color: '#1e2d4a' },
+            ticks: { color: '#8896b0', font: { family: 'SF Mono, monospace', size: 11 } },
+          },
+        },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#e8ecf4',
+              font: { family: 'SF Mono, monospace', size: 12 },
+              usePointStyle: true,
+              pointStyle: 'line',
+            },
+          },
+          tooltip: {
+            backgroundColor: '#141c2e',
+            borderColor: '#1e2d4a',
+            borderWidth: 1,
+            titleColor: '#e8ecf4',
+            bodyColor: '#8896b0',
+            titleFont: { family: 'SF Mono, monospace' },
+            bodyFont: { family: 'SF Mono, monospace' },
+          },
+        },
+      },
+    });
+
+    // --- MQTT Connection ---
+    let mqttClient = null;
+
+    function toggleConnection() {
+      if (mqttClient && mqttClient.connected) {
+        disconnect();
+      } else {
+        connect();
+      }
+    }
+
+    // ── Configuration ─────────────────────────────────────────────
+    // Override these for your setup. When served over HTTPS, the
+    // webapp connects via wss:// through a reverse proxy at /mqtt.
+    // When served over HTTP (LAN), it connects directly to the broker.
+    const PLANTPULSE_CONFIG = {
+      mqttBrokerLAN: 'ws://192.168.1.200:9001',   // Direct LAN broker WebSocket URL
+      mqttUsername: 'plantpulse',                   // MQTT username
+      mqttPassword: 'changeme',                     // MQTT password — change this!
+      mqttTopic: 'plantpulse/sensor/plant_signal/state',
+    };
+    // ────────────────────────────────────────────────────────────────
+
+    function getMqttUrl() {
+      if (location.protocol === 'https:') {
+        return `wss://${location.host}/mqtt`;
+      }
+      return PLANTPULSE_CONFIG.mqttBrokerLAN;
+    }
+
+    function connect() {
+      const brokerUrl = getMqttUrl();
+
+      setStatus('connecting');
+
+      mqttClient = mqtt.connect(brokerUrl, {
+        clientId: 'plantpulse-web-' + Math.random().toString(16).slice(2, 8),
+        clean: true,
+        username: PLANTPULSE_CONFIG.mqttUsername,
+        password: PLANTPULSE_CONFIG.mqttPassword,
+      });
+
+      mqttClient.on('connect', () => {
+        setStatus('connected');
+        document.getElementById('connectBtn').textContent = 'Disconnect';
+        document.getElementById('connectBtn').style.display = 'inline-block';
+        document.getElementById('connectBtn').classList.add('active');
+        // Subscribe to the ESPHome MQTT sensor topic
+        mqttClient.subscribe(PLANTPULSE_CONFIG.mqttTopic);
+      });
+
+      mqttClient.on('message', (topic, message) => {
+        if (topic === PLANTPULSE_CONFIG.mqttTopic) {
+          const value = parseFloat(message.toString());
+          if (!isNaN(value)) {
+            handleSensorData({ id: 'sensor-plant_signal', value });
+          }
+        }
+      });
+
+      mqttClient.on('error', () => {
+        setStatus('error');
+      });
+
+      mqttClient.on('close', () => {
+        setStatus('disconnected');
+        document.getElementById('connectBtn').textContent = 'Connect';
+        document.getElementById('connectBtn').style.display = 'inline-block';
+        document.getElementById('connectBtn').classList.remove('active');
+      });
+    }
+
+    function disconnect() {
+      if (mqttClient) {
+        mqttClient.end();
+        mqttClient = null;
+      }
+      setStatus('disconnected');
+      document.getElementById('connectBtn').textContent = 'Connect';
+        document.getElementById('connectBtn').style.display = 'inline-block';
+      document.getElementById('connectBtn').classList.remove('active');
+    }
+
+    function setStatus(state) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      dot.className = 'status-dot';
+
+      switch (state) {
+        case 'connected':
+          dot.classList.add('connected');
+          text.textContent = 'Connected';
+          break;
+        case 'connecting':
+          text.textContent = 'Connecting...';
+          break;
+        case 'error':
+          dot.classList.add('error');
+          text.textContent = 'Connection Error';
+          break;
+        default:
+          text.textContent = 'Disconnected';
+      }
+    }
+
+    // --- Data Handling ---
+    function handleSensorData(data) {
+      if (paused) return;
+
+      const now = new Date();
+      const value = parseFloat(data.value);
+
+      if (isNaN(value)) return;
+
+      const id = data.id;
+
+      if (id === 'sensor-plant_signal') {
+        // ESP32 sends raw volts — convert to mV and process everything here
+        const mV = value * 1000;
+
+        // Sliding window moving average (was on ESP32)
+        rawWindow.push(mV);
+        if (rawWindow.length > RAW_WINDOW_SIZE) rawWindow.shift();
+        const avgMv = rawWindow.reduce((a, b) => a + b, 0) / rawWindow.length;
+
+        rawHistory.push({ x: now, y: avgMv });
+        updateRawStats(avgMv);
+        currentRawValue = avgMv;
+        document.getElementById('rawValue').innerHTML =
+          `${avgMv.toFixed(3)} <span class="unit">mV</span>`;
+
+        // EMA smoothing
+        if (!emaInitialized) {
+          emaSmoothed = avgMv;
+          emaInitialized = true;
+        } else {
+          emaSmoothed = EMA_ALPHA * avgMv + (1 - EMA_ALPHA) * emaSmoothed;
+        }
+        currentSmoothed = emaSmoothed;
+        smoothedHistory.push({ x: now, y: emaSmoothed });
+        document.getElementById('smoothedValue').innerHTML =
+          `${emaSmoothed.toFixed(2)} <span class="unit">mV</span>`;
+
+        // Activity level (rate of change)
+        const delta = Math.abs(avgMv - lastRawForActivity);
+        lastRawForActivity = avgMv;
+        const pct = Math.min(100, (delta / 15) * 100);
+        currentActivity = pct;
+        document.getElementById('activityFill').style.width = pct + '%';
+        document.getElementById('activityValue').textContent = pct.toFixed(1) + '%';
+
+        const fill = document.getElementById('activityFill');
+        if (pct > 50) {
+          fill.style.background = 'linear-gradient(90deg, #34d399, #d4956a, #f87171)';
+        } else if (pct > 20) {
+          fill.style.background = 'linear-gradient(90deg, #059669, #34d399, #6ea8fe)';
+        } else {
+          fill.style.background = 'linear-gradient(90deg, #064e3b, #059669, #34d399)';
+        }
+      }
+
+      // Trim old data outside window
+      const cutoff = new Date(now.getTime() - windowSeconds * 1000);
+      trimData(rawHistory, cutoff);
+      trimData(smoothedHistory, cutoff);
+
+      chart.update('none');
+    }
+
+    function trimData(arr, cutoff) {
+      while (arr.length > 0 && arr[0].x < cutoff) {
+        arr.shift();
+      }
+    }
+
+    function updateRawStats(value) {
+      if (value < rawMin) rawMin = value;
+      if (value > rawMax) rawMax = value;
+      rawSum += value;
+      rawCount++;
+
+      document.getElementById('minMaxValue').innerHTML =
+        `${rawMin.toFixed(2)} / ${rawMax.toFixed(2)} <span class="unit">mV</span>`;
+
+      // Rolling average from visible data
+      if (rawHistory.length > 0) {
+        const visibleSum = rawHistory.reduce((s, p) => s + p.y, 0);
+        const avg = visibleSum / rawHistory.length;
+        document.getElementById('avgValue').innerHTML =
+          `${avg.toFixed(3)} <span class="unit">mV</span>`;
+      }
+    }
+
+    // --- Controls ---
+    function togglePause() {
+      paused = !paused;
+      const btn = document.getElementById('pauseBtn');
+      btn.textContent = paused ? 'Resume' : 'Pause';
+      btn.classList.toggle('active', paused);
+    }
+
+    function clearChart() {
+      rawHistory.length = 0;
+      smoothedHistory.length = 0;
+      rawMin = Infinity;
+      rawMax = -Infinity;
+      rawSum = 0;
+      rawCount = 0;
+      signalMin = -3;
+      signalMax = 3;
+      document.getElementById('minMaxValue').innerHTML = '-- <span class="unit">mV</span>';
+      document.getElementById('avgValue').innerHTML = '-- <span class="unit">mV</span>';
+      chart.update('none');
+    }
+
+    function setWindow(seconds, btn) {
+      windowSeconds = seconds;
+      document.querySelectorAll('.window-selector button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Trim data to new window
+      const cutoff = new Date(Date.now() - windowSeconds * 1000);
+      trimData(rawHistory, cutoff);
+      trimData(smoothedHistory, cutoff);
+      chart.update('none');
+    }
+    // --- Auto-connect on page load ---
+    window.addEventListener('load', () => {
+      connect();
+    });
+  </script>
+</body>
+</html>

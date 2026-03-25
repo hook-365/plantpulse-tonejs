@@ -1,0 +1,12 @@
+# ESPHome secrets (contains WiFi passwords, API keys, MQTT credentials)
+secrets.yaml
+
+# ESPHome build artifacts
+.esphome/
+
+# Claude Code
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
