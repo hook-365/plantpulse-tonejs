@@ -1,11 +1,26 @@
 services:
   plantpulse:
-    image: nginx:alpine
+    build: .
     container_name: plantpulse
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8286:80"
-    volumes:
-      - ./index.html:/usr/share/nginx/html/index.html:ro
-      - ./logo.svg:/usr/share/nginx/html/logo.svg:ro
-      - ./config.json:/usr/share/nginx/html/config.json:ro
+      - "127.0.0.1:8286:8286"
+    environment:
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=plantpulse
+      - DB_USER=plantpulse
+      - DB_PASS=plantpulse
+      - MQTT_HOST=${MQTT_HOST:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USER=${MQTT_USER:-plantpulse}
+      - MQTT_PASS=${MQTT_PASS}
+    networks:
+      seg_monitoring:
+      seg_iot:
+
+networks:
+  seg_monitoring:
+    external: true
+  seg_iot:
+    external: true

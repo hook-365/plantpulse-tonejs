@@ -7,6 +7,12 @@ secrets.yaml
 # Claude Code
 .claude/
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+history/.venv/
+
 # OS files
 .DS_Store
 Thumbs.db
