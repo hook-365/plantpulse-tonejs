@@ -502,6 +502,124 @@
       .preset-btn { font-size: 8px; padding: 4px 8px; letter-spacing: 0.3px; }
     }
 
+    /* --- Patch Bay --- */
+    .patch-bay { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2d4a; }
+    .patch-bay.open { display: block; }
+    .patch-bay-toggle { font-size: 9px; letter-spacing: 1px; color: #d4956a; cursor: pointer; user-select: none; text-transform: uppercase; }
+    .patch-bay-toggle:hover { color: #e8c8a0; }
+    .patch-bay-inner { position: relative; display: flex; gap: 0; min-height: 200px; }
+    .patch-col { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; z-index: 2; }
+    .patch-col-src { min-width: 90px; align-items: flex-end; }
+    .patch-col-dst { min-width: 90px; align-items: flex-start; }
+    .patch-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+    .patch-svg .cable { pointer-events: stroke; cursor: pointer; stroke-width: 2.5; fill: none; opacity: 0.75; transition: opacity 0.15s; }
+    .patch-svg .cable:hover { stroke-width: 4; opacity: 1; }
+    .patch-svg .cable-drag { stroke-dasharray: 6 4; stroke-width: 2; fill: none; opacity: 0.5; }
+    .patch-jack {
+      display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 2px 6px;
+      font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; color: #5a6a8a;
+      white-space: nowrap; user-select: none;
+    }
+    .patch-jack:hover { color: #e8ecf4; }
+    .patch-jack:hover .jack-socket { border-color: #e8ecf4; }
+    .patch-jack.active { color: #e8ecf4; }
+    .jack-socket {
+      width: 12px; height: 12px; border-radius: 50%; border: 2px solid #2a3d5e;
+      background: #0a0f18; flex-shrink: 0; position: relative; transition: all 0.15s;
+    }
+    .jack-socket.connected { border-color: var(--jack-color, #d4956a); background: var(--jack-color, #d4956a); box-shadow: 0 0 6px var(--jack-color, #d4956a); }
+    .jack-socket::after {
+      content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+      border-radius: 50%; background: #0a0f18; transform: translate(-50%,-50%);
+    }
+    .patch-center { flex: 1; min-width: 80px; }
+    .patch-group-label {
+      font-size: 7px; text-transform: uppercase; letter-spacing: 1.5px; color: #3a4a6a;
+      padding: 4px 6px 1px; font-weight: 600;
+    }
+    .patch-group-label.src-label { text-align: right; }
+    .patch-depth-popup {
+      position: absolute; z-index: 10; background: #141c2e; border: 1px solid #2a3d5e;
+      border-radius: 6px; padding: 6px 10px; display: none; align-items: center; gap: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5); font-size: 9px; color: #8896b0;
+    }
+    .patch-depth-popup.visible { display: flex; }
+    .patch-depth-popup input[type="range"] { width: 80px; accent-color: #d4956a; }
+    .patch-depth-popup .remove-cable { color: #f87171; cursor: pointer; font-size: 10px; }
+    .patch-depth-popup .remove-cable:hover { color: #fca5a5; }
+
+    /* --- XY Morph Pad --- */
+    .xy-pad-section { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2d4a; }
+    .xy-pad-section.open { display: block; }
+    .xy-pad-toggle { font-size: 9px; letter-spacing: 1px; color: #a78bfa; cursor: pointer; user-select: none; text-transform: uppercase; }
+    .xy-pad-toggle:hover { color: #c4b5fd; }
+    .xy-pad-layout { display: flex; gap: 12px; align-items: flex-start; }
+    .xy-pad-container { position: relative; flex-shrink: 0; }
+    .xy-pad {
+      width: 200px; height: 200px; background: #0a0f18; border: 1px solid #1a2540;
+      border-radius: 6px; cursor: crosshair; position: relative; overflow: hidden;
+      touch-action: none;
+    }
+    .xy-pad::before {
+      content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px;
+      background: #1a2540; pointer-events: none;
+    }
+    .xy-pad::after {
+      content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+      background: #1a2540; pointer-events: none;
+    }
+    .xy-dot {
+      position: absolute; width: 14px; height: 14px; border-radius: 50%;
+      background: radial-gradient(circle, #d4956a 0%, rgba(212,149,106,0.3) 70%);
+      border: 2px solid #d4956a; transform: translate(-50%, -50%);
+      box-shadow: 0 0 12px rgba(212,149,106,0.5); pointer-events: none;
+      transition: left 0.08s, top 0.08s;
+    }
+    .xy-dot.dragging { transition: none; box-shadow: 0 0 20px rgba(212,149,106,0.8); }
+    .xy-trail {
+      position: absolute; border-radius: 50%; pointer-events: none; opacity: 0;
+      background: rgba(212,149,106,0.15); transform: translate(-50%, -50%);
+    }
+    .xy-corner {
+      position: absolute; width: 28px; height: 28px; display: flex; align-items: center;
+      justify-content: center; font-size: 7px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #3a4a6a; cursor: pointer; user-select: none; z-index: 2; border-radius: 4px;
+      border: 1px solid transparent; transition: all 0.15s;
+    }
+    .xy-corner:hover { color: #8896b0; border-color: #2a3d5e; background: rgba(10,15,24,0.8); }
+    .xy-corner.saved { color: #d4956a; border-color: rgba(212,149,106,0.3); background: rgba(212,149,106,0.08); }
+    .xy-corner.saved::after {
+      content: ''; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+      width: 4px; height: 4px; border-radius: 50%; background: #d4956a;
+    }
+    .xy-corner-tl { top: 2px; left: 2px; }
+    .xy-corner-tr { top: 2px; right: 2px; }
+    .xy-corner-bl { bottom: 2px; left: 2px; }
+    .xy-corner-br { bottom: 2px; right: 2px; }
+    .xy-axis-label {
+      position: absolute; font-size: 7px; text-transform: uppercase; letter-spacing: 1px;
+      color: #3a4a6a; pointer-events: none;
+    }
+    .xy-axis-x { bottom: -14px; left: 50%; transform: translateX(-50%); }
+    .xy-axis-y { top: 50%; left: -14px; transform: translateY(-50%) rotate(-90deg); }
+    .xy-controls { display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
+    .xy-control-row { display: flex; align-items: center; gap: 6px; font-size: 9px; color: #8896b0; }
+    .xy-control-row label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; color: #5a6a8a; min-width: 14px; }
+    .xy-control-row select {
+      font-size: 9px; background: #0a0f18; color: #8896b0; border: 1px solid #1a2540;
+      border-radius: 3px; padding: 2px 4px;
+    }
+    .xy-readout { font-family: 'SF Mono', monospace; font-size: 10px; color: #5a6a8a; margin-top: 4px; }
+    .xy-morph-indicator {
+      font-size: 8px; color: #d4956a; margin-top: 2px; opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .xy-morph-indicator.active { opacity: 1; }
+    @media (max-width: 600px) {
+      .xy-pad { width: 160px; height: 160px; }
+      .xy-pad-layout { flex-direction: column; align-items: center; }
+    }
+
     /* --- Percussion Sequencer --- */
     .perc-section {
       margin-top: 4px;
@@ -881,6 +999,23 @@
         </div>
       </div>
     </div>
+    <div class="channel-indicators" style="display:flex;gap:12px;margin-top:10px;padding:0 4px;">
+      <div class="ch-indicator" id="ch-ind-ch1" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
+        <span style="width:8px;height:8px;border-radius:50%;background:#34d399;opacity:0.3;display:inline-block;" id="ch-dot-ch1"></span>
+        Clips A
+        <span id="ch-val-ch1" style="color:#34d399;font-family:'SF Mono',monospace;">--</span>
+      </div>
+      <div class="ch-indicator" id="ch-ind-ch2" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
+        <span style="width:8px;height:8px;border-radius:50%;background:#6ea8fe;opacity:0.3;display:inline-block;" id="ch-dot-ch2"></span>
+        Clips B
+        <span id="ch-val-ch2" style="color:#6ea8fe;font-family:'SF Mono',monospace;">--</span>
+      </div>
+      <div class="ch-indicator" id="ch-ind-ch3" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
+        <span style="width:8px;height:8px;border-radius:50%;background:#f472b6;opacity:0.3;display:inline-block;" id="ch-dot-ch3"></span>
+        TENS Pads
+        <span id="ch-val-ch3" style="color:#f472b6;font-family:'SF Mono',monospace;">--</span>
+      </div>
+    </div>
     <div class="signal-waveform" id="signalWaveform" style="display:none">
       <canvas class="waveform-canvas" id="waveformCanvas" style="width:100%;height:50px;border-radius:4px;margin-top:8px"></canvas>
     </div>
@@ -947,7 +1082,81 @@
         <button class="perc-toggle on" id="melodyToggleInline" onclick="toggleMelody()" style="font-size:8px;padding:2px 8px">ON</button>
         <div class="divider"></div>
         <button class="reset-btn" onclick="resetCurrentPreset()">Reset</button>
+        <span class="patch-bay-toggle" onclick="togglePatchBay()">Patch Bay</span>
+        <span class="xy-pad-toggle" onclick="toggleXYPad()">XY Pad</span>
         <span class="synth-toggle" onclick="document.getElementById('synthPanel').classList.toggle('open')">Synth Panel</span>
+      </div>
+    </div>
+    <!-- Patch Bay (modular cable routing) -->
+    <div class="patch-bay" id="patchBay">
+      <div class="patch-bay-inner" id="patchBayInner">
+        <div class="patch-col patch-col-src" id="patchSrcCol"></div>
+        <div class="patch-center">
+          <svg class="patch-svg" id="patchSvg"></svg>
+          <div class="patch-depth-popup" id="patchDepthPopup">
+            <span id="patchDepthLabel">--</span>
+            <input type="range" min="-100" max="100" value="50" id="patchDepthSlider">
+            <span id="patchDepthVal">50%</span>
+            <span class="remove-cable" id="patchRemoveBtn" title="Remove cable">&times;</span>
+          </div>
+        </div>
+        <div class="patch-col patch-col-dst" id="patchDstCol"></div>
+      </div>
+    </div>
+    <!-- XY Morph Pad -->
+    <div class="xy-pad-section" id="xyPadSection">
+      <div class="xy-pad-layout">
+        <div class="xy-pad-container">
+          <div class="xy-pad" id="xyPad">
+            <div class="xy-dot" id="xyDot"></div>
+            <div class="xy-corner xy-corner-tl" id="xyCornerTL" onclick="xyCornerAction('tl', event)" title="Click to save snapshot, Shift+click to clear">A</div>
+            <div class="xy-corner xy-corner-tr" id="xyCornerTR" onclick="xyCornerAction('tr', event)" title="Click to save snapshot, Shift+click to clear">B</div>
+            <div class="xy-corner xy-corner-bl" id="xyCornerBL" onclick="xyCornerAction('bl', event)" title="Click to save snapshot, Shift+click to clear">C</div>
+            <div class="xy-corner xy-corner-br" id="xyCornerBR" onclick="xyCornerAction('br', event)" title="Click to save snapshot, Shift+click to clear">D</div>
+          </div>
+          <div class="xy-axis-label xy-axis-x" id="xyAxisXLabel">X</div>
+          <div class="xy-axis-label xy-axis-y" id="xyAxisYLabel">Y</div>
+        </div>
+        <div class="xy-controls">
+          <div class="xy-control-row">
+            <label>X:</label>
+            <select id="xySourceX" onchange="xyAxisSource.x = this.value; scheduleSave();">
+              <option value="ch1_smooth" selected>Clips A smo</option>
+              <option value="ch1_raw">Clips A raw</option>
+              <option value="ch1_activity">Clips A act</option>
+              <option value="ch2_smooth">Clips B smo</option>
+              <option value="ch2_raw">Clips B raw</option>
+              <option value="ch2_activity">Clips B act</option>
+              <option value="ch3_smooth">TENS smo</option>
+              <option value="ch3_raw">TENS raw</option>
+              <option value="ch3_activity">TENS act</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+          <div class="xy-control-row">
+            <label>Y:</label>
+            <select id="xySourceY" onchange="xyAxisSource.y = this.value; scheduleSave();">
+              <option value="ch2_smooth" selected>Clips B smo</option>
+              <option value="ch2_raw">Clips B raw</option>
+              <option value="ch2_activity">Clips B act</option>
+              <option value="ch1_smooth">Clips A smo</option>
+              <option value="ch1_raw">Clips A raw</option>
+              <option value="ch1_activity">Clips A act</option>
+              <option value="ch3_smooth">TENS smo</option>
+              <option value="ch3_raw">TENS raw</option>
+              <option value="ch3_activity">TENS act</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+          <div class="xy-readout">
+            X: <span id="xyReadX">0.50</span> &nbsp; Y: <span id="xyReadY">0.50</span>
+          </div>
+          <div class="xy-morph-indicator" id="xyMorphIndicator">Morphing</div>
+          <div style="margin-top:8px; font-size:8px; color:#3a4a6a; line-height:1.4;">
+            Click corners to save<br>current synth as snapshot.<br>
+            Shift+click to clear.
+          </div>
+        </div>
       </div>
     </div>
     <!-- Synth knob panel (collapsed by default) -->
@@ -974,10 +1183,14 @@
         </div>
         <div class="mod-row" style="max-width:none">
           <span class="knob-label" style="margin-right:4px">Density</span>
-          <select class="mod-src" style="width:auto" onchange="percDensitySource=this.value; scheduleSave();" id="percDensitySrc">
+          <select class="mod-src" style="width:auto;font-size:8px" onchange="percDensitySource=this.value; scheduleSave();" id="percDensitySrc">
             <option value="fixed">--</option>
-            <option value="plant_activity" selected>P:activity</option>
-            <option value="plant_smooth">P:smooth</option>
+            <option value="plant_activity" selected>P:act</option>
+            <option value="plant_smooth">P:smo</option>
+            <option value="ch1_activity">1:act</option>
+            <option value="ch2_activity">2:act</option>
+            <option value="ch3_activity">3:act</option>
+            <option value="max_activity">MaxAct</option>
           </select>
         </div>
       </div>
@@ -1018,10 +1231,41 @@
     // MQTT client (replaces EventSource)
     let paused = false;
     let windowSeconds = 30;
-    let rawHistory = [];
-    let smoothedHistory = [];
 
-    // Stats tracking
+    // Multi-channel definitions
+    const CHANNELS = {
+      ch1: { label: 'Clips A', color: '#34d399', smoothColor: '#d4956a', electrode: 'alligator clips' },
+      ch2: { label: 'Clips B', color: '#6ea8fe', smoothColor: '#a78bfa', electrode: 'alligator clips' },
+      ch3: { label: 'TENS Pads', color: '#f472b6', smoothColor: '#fbbf24', electrode: 'TENS sticky pads' },
+    };
+    const activeChannel = 'ch1'; // primary channel for synth control
+
+    // Per-channel state
+    const chState = {};
+    for (const [ch, def] of Object.entries(CHANNELS)) {
+      chState[ch] = {
+        rawHistory: [],
+        smoothedHistory: [],
+        rawMin: Infinity,
+        rawMax: -Infinity,
+        rawSum: 0,
+        rawCount: 0,
+        emaSmoothed: 0,
+        emaInitialized: false,
+        lastRawForActivity: 0,
+        rawWindow: [],
+        currentRawValue: 0,
+        currentActivity: 0,
+        currentSmoothed: 0,
+        connected: false,
+      };
+    }
+
+    // Legacy aliases — point to ch1 for synth engine compatibility
+    let rawHistory = chState.ch1.rawHistory;
+    let smoothedHistory = chState.ch1.smoothedHistory;
+
+    // Stats tracking (ch1 primary)
     let rawMin = Infinity;
     let rawMax = -Infinity;
     let rawSum = 0;
@@ -1173,17 +1417,93 @@
       'rev_wet','dly_fb','dly_wet','chr_rate','chr_wet','dist_amt',
       'seq_prob','seq_gate','pan',
     ];
-    const MOD_SOURCES = ['fixed','plant_raw','plant_smooth','plant_activity','lfo1','lfo2'];
+    // Mod sources: legacy aliases (plant_raw/smooth/activity) resolve to activeChannel
+    // Per-channel: ch1_raw, ch2_smooth, ch3_activity, etc.
+    // Derived: diff_12 (ch1-ch2 divergence), avg_all, max_activity
+    const MOD_SOURCES = [
+      'fixed',
+      // Legacy (active channel)
+      'plant_raw','plant_smooth','plant_activity',
+      // Per-channel
+      'ch1_raw','ch1_smooth','ch1_activity',
+      'ch2_raw','ch2_smooth','ch2_activity',
+      'ch3_raw','ch3_smooth','ch3_activity',
+      // Derived / interaction
+      'diff_12',       // |ch1 - ch2| normalized — divergence between clip pairs
+      'avg_all',       // average of all smoothed channels
+      'max_activity',  // highest activity across all channels
+      // XY morph pad
+      'xy_x','xy_y',
+      // LFOs
+      'lfo1','lfo2',
+    ];
+
+    // Resolve a mod source name to a 0-1 value
+    function resolveModSource(source) {
+      const normCh = (ch, type) => {
+        const st = chState[ch];
+        if (!st || !st.connected) return 0.5; // default mid when disconnected
+        if (type === 'raw') return (st.currentRawValue - signalMin) / (signalMax - signalMin || 1);
+        if (type === 'smooth') return (st.currentSmoothed - signalMin) / (signalMax - signalMin || 1);
+        if (type === 'activity') return st.currentActivity / 100;
+        return 0;
+      };
+
+      // Per-channel sources
+      const chMatch = source.match(/^(ch[1-3])_(raw|smooth|activity)$/);
+      if (chMatch) return normCh(chMatch[1], chMatch[2]);
+
+      switch (source) {
+        // Legacy — resolve from active channel
+        case 'plant_raw': return normCh(activeChannel, 'raw');
+        case 'plant_smooth': return normCh(activeChannel, 'smooth');
+        case 'plant_activity': return normCh(activeChannel, 'activity');
+
+        // Derived: divergence between clip pairs (0 = identical, 1 = max divergence)
+        case 'diff_12': {
+          const a = normCh('ch1', 'smooth'), b = normCh('ch2', 'smooth');
+          return Math.abs(a - b);
+        }
+        // Average of all connected smoothed channels
+        case 'avg_all': {
+          let sum = 0, n = 0;
+          for (const ch of ['ch1','ch2','ch3']) {
+            if (chState[ch].connected) { sum += normCh(ch, 'smooth'); n++; }
+          }
+          return n > 0 ? sum / n : 0.5;
+        }
+        // Highest activity across all channels
+        case 'max_activity': {
+          let max = 0;
+          for (const ch of ['ch1','ch2','ch3']) {
+            if (chState[ch].connected) max = Math.max(max, chState[ch].currentActivity / 100);
+          }
+          return max;
+        }
+        // XY morph pad
+        case 'xy_x': return xyX;
+        case 'xy_y': return xyY;
+        // LFOs
+        case 'lfo1': return (lfo1Val + 1) / 2;
+        case 'lfo2': return (lfo2Val + 1) / 2;
+        default: return 0;
+      }
+    }
+
     const modRouting = {};
     MODULATABLE.forEach(p => { modRouting[p] = { source: 'fixed', depth: 0 }; });
-    // Default: plant voltage position drives major parameters
+    // Default routing: multi-channel aware
+    // Default routing: uses legacy plant_* sources (resolve to active channel)
+    // so everything works with 1 input. Re-route per-channel in patch bay when hw ready.
     modRouting['filter_cutoff'] = { source: 'plant_smooth', depth: 0.7 };
-    modRouting['osc2_level'] = { source: 'plant_raw', depth: 0.6 };
-    modRouting['rev_wet'] = { source: 'plant_smooth', depth: 0.5 };
-    modRouting['chr_wet'] = { source: 'plant_raw', depth: 0.4 };
-    modRouting['dly_wet'] = { source: 'plant_activity', depth: 0.5 };
-    modRouting['osc1_detune'] = { source: 'lfo1', depth: 0.2 };
-    modRouting['pan'] = { source: 'plant_raw', depth: 0.6 };
+    modRouting['osc2_level']    = { source: 'plant_raw', depth: 0.6 };
+    modRouting['rev_wet']       = { source: 'plant_smooth', depth: 0.5 };
+    modRouting['chr_wet']       = { source: 'plant_raw', depth: 0.4 };
+    modRouting['dly_wet']       = { source: 'plant_activity', depth: 0.5 };
+    modRouting['osc1_detune']   = { source: 'lfo1', depth: 0.2 };
+    modRouting['pan']           = { source: 'plant_raw', depth: 0.6 };
+    modRouting['filter_res']    = { source: 'plant_activity', depth: 0.4 };
+    modRouting['dist_amt']      = { source: 'plant_activity', depth: 0.3 };
 
     // --- JS-side LFOs (control-rate, not audio-rate) ---
     let lfo1Phase = 0, lfo2Phase = 0, lfo1Val = 0, lfo2Val = 0;
@@ -1217,18 +1537,7 @@
       const r = modRouting[name];
       if (!r || r.source === 'fixed' || r.depth === 0) return p.value;
 
-      let mod = 0;
-      let isPlantSource = false;
-      switch (r.source) {
-        case 'plant_raw': mod = (currentRawValue - signalMin) / (signalMax - signalMin || 1); isPlantSource = true; break;
-        case 'plant_smooth': mod = (currentSmoothed - signalMin) / (signalMax - signalMin || 1); isPlantSource = true; break;
-        case 'plant_activity': mod = currentActivity / 100; isPlantSource = true; break;
-        case 'lfo1': mod = (lfo1Val + 1) / 2; break;
-        case 'lfo2': mod = (lfo2Val + 1) / 2; break;
-      }
-      mod = Math.max(0, Math.min(1, mod));
-
-      // Apply global sensitivity to plant-sourced modulation
+      let mod = Math.max(0, Math.min(1, resolveModSource(r.source)));
       const depth = r.depth;
 
       if (p.curve === 'exp') {
@@ -2101,12 +2410,15 @@
 
     function getPercDensityTier() {
       let density = 0;
-      switch (percDensitySource) {
-        case 'plant_activity': density = percSmoothedActivity; break;
-        case 'plant_smooth':
-          density = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1))) * 50;
-          break;
-        default: density = 20; // fixed medium
+      if (percDensitySource === 'fixed') {
+        density = 20;
+      } else if (percDensitySource === 'plant_activity') {
+        density = percSmoothedActivity;
+      } else if (percDensitySource === 'plant_smooth') {
+        density = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1))) * 50;
+      } else {
+        // Per-channel or derived sources — use resolveModSource (0-1) scaled to 0-50
+        density = resolveModSource(percDensitySource) * 50;
       }
       // Map smoothed activity to 0-4 tier (wider bands = more stable)
       if (density < 2) return 0;
@@ -2379,6 +2691,7 @@
       logSignalState();
       percTick();           // first — sets quantize flags for everything else
       tickLFOs();
+      updateXYPad();        // morph synth params from XY position before applying
       applySynthParams();
       filterPulseTick();
       melodyTick();
@@ -2434,6 +2747,21 @@
       if (masterGain) masterGain.gain.rampTo(vol / 100, 0.1);
     }
     function updateScale() { buildNotePool(); }
+
+    // --- Mod Source Labels ---
+    function modSourceLabel(s) {
+      const labels = {
+        'fixed': '--', 'plant_raw': 'P:raw', 'plant_smooth': 'P:smo', 'plant_activity': 'P:act',
+        'ch1_raw': '1:raw', 'ch1_smooth': '1:smo', 'ch1_activity': '1:act',
+        'ch2_raw': '2:raw', 'ch2_smooth': '2:smo', 'ch2_activity': '2:act',
+        'ch3_raw': '3:raw', 'ch3_smooth': '3:smo', 'ch3_activity': '3:act',
+        'diff_12': 'Clip\u0394',
+        'avg_all': 'Avg', 'max_activity': 'MaxAct',
+        'xy_x': 'XY:X', 'xy_y': 'XY:Y',
+        'lfo1': 'LFO1', 'lfo2': 'LFO2',
+      };
+      return labels[s] || s;
+    }
 
     // --- Synth Panel UI (Knob Generation) ---
     function buildSynthPanel() {
@@ -2503,11 +2831,11 @@
         if (MODULATABLE.includes(name)) {
           const modDiv = document.createElement('div');
           modDiv.className = 'mod-row';
-          modDiv.innerHTML = `<select class="mod-src" data-param="${name}" onchange="modRouting['${name}'].source = this.value">
-              ${MOD_SOURCES.map(s => `<option value="${s}" ${modRouting[name].source === s ? 'selected' : ''}>${s.replace('plant_','P:').replace('fixed','--')}</option>`).join('')}
+          modDiv.innerHTML = `<select class="mod-src" data-param="${name}" onchange="modRouting['${name}'].source = this.value; drawPatchCables();">
+              ${MOD_SOURCES.map(s => `<option value="${s}" ${modRouting[name].source === s ? 'selected' : ''}>${modSourceLabel(s)}</option>`).join('')}
             </select>
             <input type="range" class="mod-depth" min="-100" max="100" value="${Math.round(modRouting[name].depth * 100)}"
-              onchange="modRouting['${name}'].depth = this.value / 100" data-param="${name}">`;
+              onchange="modRouting['${name}'].depth = this.value / 100; drawPatchCables();" data-param="${name}">`;
           group.appendChild(modDiv);
         }
       }
@@ -2627,6 +2955,453 @@
         }
       });
     }
+
+    // --- XY Morph Pad Engine ---
+    const xyAxisSource = { x: 'ch1_smooth', y: 'ch2_smooth' };
+    let xyX = 0.5, xyY = 0.5;
+    let xyDragging = false;
+    let xyManualOverride = false; // true while mouse is held on pad
+    const xySnapshots = { tl: null, tr: null, bl: null, br: null };
+
+    // Snapshot-morphable params (the full synth character)
+    const XY_MORPH_PARAMS = [
+      'osc1_level','osc2_level','osc1_detune','osc2_detune','osc1_spread','osc2_spread',
+      'filter_cutoff','filter_res','filter_env_amt','filter_env_a','filter_env_d','filter_env_s','filter_env_r',
+      'amp_a','amp_d','amp_s','amp_r','amp_level',
+      'rev_decay','rev_wet','dly_time','dly_fb','dly_wet','chr_rate','chr_wet','dist_amt','dist_wet',
+      'lfo1_rate','lfo1_depth','lfo2_rate','lfo2_depth',
+    ];
+
+    function toggleXYPad() {
+      document.getElementById('xyPadSection').classList.toggle('open');
+    }
+
+    function captureSnapshot() {
+      const snap = {};
+      XY_MORPH_PARAMS.forEach(k => { snap[k] = SYNTH_PARAMS[k].value; });
+      return snap;
+    }
+
+    function xyCornerAction(corner, event) {
+      event.stopPropagation();
+      if (event.shiftKey) {
+        // Clear snapshot
+        xySnapshots[corner] = null;
+        document.getElementById('xyCorner' + corner.toUpperCase()).classList.remove('saved');
+      } else {
+        // Save current synth state as snapshot
+        xySnapshots[corner] = captureSnapshot();
+        document.getElementById('xyCorner' + corner.toUpperCase()).classList.add('saved');
+      }
+      scheduleSave();
+    }
+
+    function applyXYMorph() {
+      // Count how many corners have snapshots
+      const corners = ['tl','tr','bl','br'];
+      const saved = corners.filter(c => xySnapshots[c] !== null);
+      if (saved.length < 2) return; // need at least 2 corners for morphing
+
+      const morphInd = document.getElementById('xyMorphIndicator');
+      if (morphInd) morphInd.classList.toggle('active', saved.length >= 2);
+
+      // Bilinear interpolation weights
+      const x = xyX, y = xyY;
+      const weights = {
+        tl: (1 - x) * (1 - y),
+        tr: x * (1 - y),
+        bl: (1 - x) * y,
+        br: x * y,
+      };
+
+      // Normalize weights to only include saved corners
+      let totalWeight = 0;
+      saved.forEach(c => { totalWeight += weights[c]; });
+      if (totalWeight === 0) return;
+
+      XY_MORPH_PARAMS.forEach(paramName => {
+        const p = SYNTH_PARAMS[paramName];
+        if (!p) return;
+        let val = 0;
+        saved.forEach(c => {
+          val += (weights[c] / totalWeight) * xySnapshots[c][paramName];
+        });
+        // Clamp to param range
+        if (p.curve === 'exp') {
+          val = Math.max(p.min, Math.min(p.max, val));
+        } else {
+          val = Math.max(p.min, Math.min(p.max, val));
+          if (p.type === 'int') val = Math.round(val);
+        }
+        p.value = val;
+      });
+    }
+
+    function updateXYPad() {
+      // Get source values (unless manually dragging)
+      if (!xyManualOverride) {
+        if (xyAxisSource.x !== 'manual') {
+          xyX = Math.max(0, Math.min(1, resolveModSource(xyAxisSource.x)));
+        }
+        if (xyAxisSource.y !== 'manual') {
+          xyY = Math.max(0, Math.min(1, resolveModSource(xyAxisSource.y)));
+        }
+      }
+
+      // Update dot position
+      const dot = document.getElementById('xyDot');
+      if (dot) {
+        dot.style.left = (xyX * 100) + '%';
+        dot.style.top = (xyY * 100) + '%';
+      }
+
+      // Update readout
+      const rxEl = document.getElementById('xyReadX');
+      const ryEl = document.getElementById('xyReadY');
+      if (rxEl) rxEl.textContent = xyX.toFixed(2);
+      if (ryEl) ryEl.textContent = xyY.toFixed(2);
+
+      // Apply morph if snapshots exist
+      applyXYMorph();
+    }
+
+    // Mouse/touch interaction on XY pad
+    (function() {
+      const pad = document.getElementById('xyPad');
+      if (!pad) return;
+
+      function getXY(e) {
+        const rect = pad.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+          x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+          y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+        };
+      }
+
+      function startDrag(e) {
+        // Don't intercept corner button clicks
+        if (e.target.closest('.xy-corner')) return;
+        e.preventDefault();
+        xyDragging = true;
+        xyManualOverride = true;
+        const dot = document.getElementById('xyDot');
+        if (dot) dot.classList.add('dragging');
+        const pos = getXY(e);
+        xyX = pos.x;
+        xyY = pos.y;
+      }
+
+      function moveDrag(e) {
+        if (!xyDragging) return;
+        e.preventDefault();
+        const pos = getXY(e);
+        xyX = pos.x;
+        xyY = pos.y;
+      }
+
+      function endDrag() {
+        if (!xyDragging) return;
+        xyDragging = false;
+        // Keep manual override for 2 seconds, then release back to channel-driven
+        const dot = document.getElementById('xyDot');
+        if (dot) dot.classList.remove('dragging');
+        setTimeout(() => {
+          if (!xyDragging) {
+            xyManualOverride = (xyAxisSource.x === 'manual' && xyAxisSource.y === 'manual');
+          }
+        }, 2000);
+      }
+
+      pad.addEventListener('mousedown', startDrag);
+      pad.addEventListener('touchstart', startDrag, { passive: false });
+      document.addEventListener('mousemove', moveDrag);
+      document.addEventListener('touchmove', moveDrag, { passive: false });
+      document.addEventListener('mouseup', endDrag);
+      document.addEventListener('touchend', endDrag);
+    })();
+
+    // --- Patch Bay Engine ---
+    const PATCH_SRC_GROUPS = [
+      { label: 'Clips A', items: [
+        { id: 'ch1_raw', label: 'Raw', color: '#34d399' },
+        { id: 'ch1_smooth', label: 'Smooth', color: '#34d399' },
+        { id: 'ch1_activity', label: 'Activity', color: '#34d399' },
+      ]},
+      { label: 'Clips B', items: [
+        { id: 'ch2_raw', label: 'Raw', color: '#6ea8fe' },
+        { id: 'ch2_smooth', label: 'Smooth', color: '#6ea8fe' },
+        { id: 'ch2_activity', label: 'Activity', color: '#6ea8fe' },
+      ]},
+      { label: 'TENS Pads', items: [
+        { id: 'ch3_raw', label: 'Raw', color: '#f472b6' },
+        { id: 'ch3_smooth', label: 'Smooth', color: '#f472b6' },
+        { id: 'ch3_activity', label: 'Activity', color: '#f472b6' },
+      ]},
+      { label: 'Derived', items: [
+        { id: 'diff_12', label: 'Clip \u0394', color: '#a78bfa' },
+        { id: 'avg_all', label: 'Average', color: '#a78bfa' },
+        { id: 'max_activity', label: 'Max Act', color: '#a78bfa' },
+      ]},
+      { label: 'XY Pad', items: [
+        { id: 'xy_x', label: 'X Axis', color: '#d4956a' },
+        { id: 'xy_y', label: 'Y Axis', color: '#d4956a' },
+      ]},
+      { label: 'LFO', items: [
+        { id: 'lfo1', label: 'LFO 1', color: '#fbbf24' },
+        { id: 'lfo2', label: 'LFO 2', color: '#fbbf24' },
+      ]},
+    ];
+
+    const PATCH_DST_GROUPS = [
+      { label: 'Oscillators', items: ['osc1_detune','osc1_level','osc2_detune','osc2_level'] },
+      { label: 'Filter', items: ['filter_cutoff','filter_res'] },
+      { label: 'Amp', items: ['amp_level'] },
+      { label: 'Effects', items: ['rev_wet','dly_fb','dly_wet','chr_rate','chr_wet','dist_amt'] },
+      { label: 'Sequencer', items: ['seq_prob','seq_gate','pan'] },
+    ];
+
+    // Map source IDs to their colors
+    const SRC_COLORS = {};
+    PATCH_SRC_GROUPS.forEach(g => g.items.forEach(i => { SRC_COLORS[i.id] = i.color; }));
+
+    let patchDragState = null; // { srcId, srcEl } while dragging
+
+    function togglePatchBay() {
+      const bay = document.getElementById('patchBay');
+      bay.classList.toggle('open');
+      if (bay.classList.contains('open')) {
+        buildPatchBay();
+        drawPatchCables();
+      }
+    }
+
+    function buildPatchBay() {
+      const srcCol = document.getElementById('patchSrcCol');
+      const dstCol = document.getElementById('patchDstCol');
+      if (srcCol.children.length > 0) return; // already built
+
+      // Source jacks (outputs)
+      PATCH_SRC_GROUPS.forEach(group => {
+        const lbl = document.createElement('div');
+        lbl.className = 'patch-group-label src-label';
+        lbl.textContent = group.label;
+        srcCol.appendChild(lbl);
+        group.items.forEach(item => {
+          const jack = document.createElement('div');
+          jack.className = 'patch-jack patch-jack-src';
+          jack.dataset.srcId = item.id;
+          jack.innerHTML = `<span>${item.label}</span><div class="jack-socket" style="--jack-color:${item.color}" id="src-jack-${item.id}"></div>`;
+          jack.addEventListener('mousedown', (e) => startPatchDrag(e, item.id));
+          srcCol.appendChild(jack);
+        });
+      });
+
+      // Destination jacks (inputs)
+      PATCH_DST_GROUPS.forEach(group => {
+        const lbl = document.createElement('div');
+        lbl.className = 'patch-group-label';
+        lbl.textContent = group.label;
+        dstCol.appendChild(lbl);
+        group.items.forEach(paramName => {
+          const p = SYNTH_PARAMS[paramName];
+          const jack = document.createElement('div');
+          jack.className = 'patch-jack patch-jack-dst';
+          jack.dataset.dstId = paramName;
+          jack.innerHTML = `<div class="jack-socket" id="dst-jack-${paramName}"></div><span>${p ? p.label : paramName}</span>`;
+          jack.addEventListener('mouseup', (e) => endPatchDrag(e, paramName));
+          jack.addEventListener('click', (e) => {
+            if (!patchDragState) showCablePopup(paramName, e);
+          });
+          dstCol.appendChild(jack);
+        });
+      });
+    }
+
+    function startPatchDrag(e, srcId) {
+      e.preventDefault();
+      patchDragState = { srcId };
+      // Highlight source jack
+      const srcSocket = document.getElementById('src-jack-' + srcId);
+      if (srcSocket) srcSocket.classList.add('connected');
+      // Start drawing drag cable
+      document.addEventListener('mousemove', onPatchDragMove);
+      document.addEventListener('mouseup', onPatchDragEnd);
+    }
+
+    function onPatchDragMove(e) {
+      if (!patchDragState) return;
+      const svg = document.getElementById('patchSvg');
+      let dragLine = svg.querySelector('.cable-drag');
+      if (!dragLine) {
+        dragLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        dragLine.classList.add('cable-drag');
+        dragLine.setAttribute('stroke', SRC_COLORS[patchDragState.srcId] || '#d4956a');
+        svg.appendChild(dragLine);
+      }
+      const srcSocket = document.getElementById('src-jack-' + patchDragState.srcId);
+      if (!srcSocket) return;
+      const bayRect = document.getElementById('patchBayInner').getBoundingClientRect();
+      const srcRect = srcSocket.getBoundingClientRect();
+      const x1 = srcRect.left + srcRect.width / 2 - bayRect.left;
+      const y1 = srcRect.top + srcRect.height / 2 - bayRect.top;
+      const x2 = e.clientX - bayRect.left;
+      const y2 = e.clientY - bayRect.top;
+      dragLine.setAttribute('d', cablePath(x1, y1, x2, y2));
+    }
+
+    function onPatchDragEnd(e) {
+      document.removeEventListener('mousemove', onPatchDragMove);
+      document.removeEventListener('mouseup', onPatchDragEnd);
+      // Remove drag line
+      const svg = document.getElementById('patchSvg');
+      const dragLine = svg.querySelector('.cable-drag');
+      if (dragLine) dragLine.remove();
+      // Remove highlight if no connection was made
+      if (patchDragState) {
+        updateJackStates();
+      }
+      patchDragState = null;
+    }
+
+    function endPatchDrag(e, dstParam) {
+      if (!patchDragState) return;
+      e.stopPropagation();
+      const srcId = patchDragState.srcId;
+      // Create connection
+      modRouting[dstParam] = { source: srcId, depth: modRouting[dstParam]?.depth || 0.5 };
+      // Sync dropdown UI
+      const srcSel = document.querySelector(`.mod-src[data-param="${dstParam}"]`);
+      if (srcSel) srcSel.value = srcId;
+      const depthEl = document.querySelector(`.mod-depth[data-param="${dstParam}"]`);
+      if (depthEl) depthEl.value = Math.round(modRouting[dstParam].depth * 100);
+      drawPatchCables();
+      scheduleSave();
+    }
+
+    function removeCable(dstParam) {
+      modRouting[dstParam] = { source: 'fixed', depth: 0 };
+      const srcSel = document.querySelector(`.mod-src[data-param="${dstParam}"]`);
+      if (srcSel) srcSel.value = 'fixed';
+      const depthEl = document.querySelector(`.mod-depth[data-param="${dstParam}"]`);
+      if (depthEl) depthEl.value = 0;
+      hideCablePopup();
+      drawPatchCables();
+      scheduleSave();
+    }
+
+    function showCablePopup(dstParam, e) {
+      const r = modRouting[dstParam];
+      if (!r || r.source === 'fixed') return;
+      const popup = document.getElementById('patchDepthPopup');
+      const bayRect = document.getElementById('patchBayInner').getBoundingClientRect();
+      popup.style.left = (e.clientX - bayRect.left - 60) + 'px';
+      popup.style.top = (e.clientY - bayRect.top + 16) + 'px';
+      document.getElementById('patchDepthLabel').textContent =
+        modSourceLabel(r.source) + ' \u2192 ' + (SYNTH_PARAMS[dstParam]?.label || dstParam);
+      const slider = document.getElementById('patchDepthSlider');
+      slider.value = Math.round(r.depth * 100);
+      document.getElementById('patchDepthVal').textContent = Math.round(r.depth * 100) + '%';
+      slider.oninput = () => {
+        r.depth = slider.value / 100;
+        document.getElementById('patchDepthVal').textContent = slider.value + '%';
+        const depthEl = document.querySelector(`.mod-depth[data-param="${dstParam}"]`);
+        if (depthEl) depthEl.value = slider.value;
+        scheduleSave();
+      };
+      document.getElementById('patchRemoveBtn').onclick = () => removeCable(dstParam);
+      popup.classList.add('visible');
+      popup._dstParam = dstParam;
+    }
+
+    function hideCablePopup() {
+      document.getElementById('patchDepthPopup').classList.remove('visible');
+    }
+
+    // Click outside popup to dismiss
+    document.addEventListener('mousedown', (e) => {
+      const popup = document.getElementById('patchDepthPopup');
+      if (popup && popup.classList.contains('visible') && !popup.contains(e.target)) {
+        hideCablePopup();
+      }
+    });
+
+    function cablePath(x1, y1, x2, y2) {
+      // Catenary-style droop cable — sags down based on horizontal distance
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const sag = Math.min(60, dist * 0.25 + 15); // natural droop
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2 + sag;
+      return `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
+    }
+
+    function drawPatchCables() {
+      const svg = document.getElementById('patchSvg');
+      if (!svg) return;
+      const bayRect = document.getElementById('patchBayInner').getBoundingClientRect();
+
+      // Clear existing cables (keep drag line if any)
+      svg.querySelectorAll('.cable').forEach(el => el.remove());
+
+      MODULATABLE.forEach(dstParam => {
+        const r = modRouting[dstParam];
+        if (!r || r.source === 'fixed' || r.depth === 0) return;
+        const srcSocket = document.getElementById('src-jack-' + r.source);
+        const dstSocket = document.getElementById('dst-jack-' + dstParam);
+        if (!srcSocket || !dstSocket) return;
+
+        const srcRect = srcSocket.getBoundingClientRect();
+        const dstRect = dstSocket.getBoundingClientRect();
+        const x1 = srcRect.left + srcRect.width / 2 - bayRect.left;
+        const y1 = srcRect.top + srcRect.height / 2 - bayRect.top;
+        const x2 = dstRect.left + dstRect.width / 2 - bayRect.left;
+        const y2 = dstRect.top + dstRect.height / 2 - bayRect.top;
+
+        const cable = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        cable.classList.add('cable');
+        cable.setAttribute('d', cablePath(x1, y1, x2, y2));
+        cable.setAttribute('stroke', SRC_COLORS[r.source] || '#d4956a');
+        cable.style.strokeWidth = Math.max(1.5, Math.abs(r.depth) * 4);
+        cable.style.opacity = 0.3 + Math.abs(r.depth) * 0.5;
+        cable.addEventListener('click', (e) => showCablePopup(dstParam, e));
+        svg.appendChild(cable);
+      });
+
+      updateJackStates();
+    }
+
+    function updateJackStates() {
+      // Reset all jacks
+      document.querySelectorAll('.jack-socket').forEach(el => el.classList.remove('connected'));
+
+      // Mark connected jacks
+      const activeSrcs = new Set();
+      MODULATABLE.forEach(dstParam => {
+        const r = modRouting[dstParam];
+        if (r && r.source !== 'fixed' && r.depth !== 0) {
+          activeSrcs.add(r.source);
+          const dstSocket = document.getElementById('dst-jack-' + dstParam);
+          if (dstSocket) {
+            dstSocket.classList.add('connected');
+            dstSocket.style.setProperty('--jack-color', SRC_COLORS[r.source] || '#d4956a');
+          }
+        }
+      });
+      activeSrcs.forEach(srcId => {
+        const srcSocket = document.getElementById('src-jack-' + srcId);
+        if (srcSocket) srcSocket.classList.add('connected');
+      });
+    }
+
+    // Redraw cables on window resize
+    window.addEventListener('resize', () => {
+      if (document.getElementById('patchBay').classList.contains('open')) {
+        drawPatchCables();
+      }
+    });
 
     // --- Preset System ---
     const FACTORY_PRESETS = {
@@ -2946,15 +3721,17 @@
       SYNTH_PARAMS.seq_mode.value = 'drone'; SYNTH_PARAMS.seq_voice.value = 'poly';
       SYNTH_PARAMS.seq_prob.value = 0.4; SYNTH_PARAMS.seq_gate.value = 0.5;
 
-      // Reset mod routing to defaults — voltage position drives everything
+      // Reset mod routing to multi-channel defaults
       MODULATABLE.forEach(p => { modRouting[p] = { source: 'fixed', depth: 0 }; });
       modRouting['filter_cutoff'] = { source: 'plant_smooth', depth: 0.7 };
-      modRouting['osc2_level'] = { source: 'plant_raw', depth: 0.6 };
-      modRouting['rev_wet'] = { source: 'plant_smooth', depth: 0.5 };
-      modRouting['chr_wet'] = { source: 'plant_raw', depth: 0.4 };
-      modRouting['dly_wet'] = { source: 'plant_activity', depth: 0.5 };
-      modRouting['osc1_detune'] = { source: 'lfo1', depth: 0.2 };
-      modRouting['pan'] = { source: 'plant_raw', depth: 0.6 };
+      modRouting['osc2_level']    = { source: 'plant_raw', depth: 0.6 };
+      modRouting['rev_wet']       = { source: 'plant_smooth', depth: 0.5 };
+      modRouting['chr_wet']       = { source: 'plant_raw', depth: 0.4 };
+      modRouting['dly_wet']       = { source: 'plant_activity', depth: 0.5 };
+      modRouting['osc1_detune']   = { source: 'lfo1', depth: 0.2 };
+      modRouting['pan']           = { source: 'plant_raw', depth: 0.6 };
+      modRouting['filter_res']    = { source: 'plant_activity', depth: 0.4 };
+      modRouting['dist_amt']      = { source: 'plant_activity', depth: 0.3 };
 
       // Apply preset overrides
       Object.keys(preset).forEach(k => {
@@ -2968,6 +3745,7 @@
       });
 
       updateAllKnobVisuals();
+      drawPatchCables();
       // Update top-bar controls to match preset
       document.getElementById('volumeSlider').value = Math.round(SYNTH_PARAMS.amp_level.value * 100);
       const modeSelect = document.getElementById('seqModeSelect');
@@ -3044,6 +3822,8 @@
         melodyOctave: melodyOctave,
         melodyDensity: melodyDensityVal,
         melodyCooldown: melodyCooldownSec,
+        xyAxisSource: { ...xyAxisSource },
+        xySnapshots: JSON.parse(JSON.stringify(xySnapshots)),
       };
       Object.keys(SYNTH_PARAMS).forEach(k => { state.params[k] = SYNTH_PARAMS[k].value; });
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
@@ -3116,8 +3896,25 @@
         // Sync volume slider
         document.getElementById('volumeSlider').value = Math.round(SYNTH_PARAMS.amp_level.value * 100);
 
+        // Restore XY pad state
+        if (state.xyAxisSource) {
+          Object.assign(xyAxisSource, state.xyAxisSource);
+          const xSel = document.getElementById('xySourceX');
+          const ySel = document.getElementById('xySourceY');
+          if (xSel) xSel.value = xyAxisSource.x;
+          if (ySel) ySel.value = xyAxisSource.y;
+        }
+        if (state.xySnapshots) {
+          ['tl','tr','bl','br'].forEach(c => {
+            xySnapshots[c] = state.xySnapshots[c] || null;
+            const el = document.getElementById('xyCorner' + c.toUpperCase());
+            if (el) el.classList.toggle('saved', !!xySnapshots[c]);
+          });
+        }
+
         buildNotePool();
         updateAllKnobVisuals();
+        drawPatchCables();
         return true;
       } catch(e) { return false; }
     }
@@ -3241,9 +4038,10 @@
       type: 'line',
       data: {
         datasets: [
+          // Ch1 — Clips A (original)
           {
-            label: 'Raw Signal (mV)',
-            data: rawHistory,
+            label: 'Clips A Raw (mV)',
+            data: chState.ch1.rawHistory,
             borderColor: '#34d399',
             backgroundColor: 'rgba(52, 211, 153, 0.06)',
             borderWidth: 1.5,
@@ -3253,9 +4051,55 @@
             yAxisID: 'y',
           },
           {
-            label: 'Smoothed (mV)',
-            data: smoothedHistory,
+            label: 'Clips A Smooth',
+            data: chState.ch1.smoothedHistory,
             borderColor: '#d4956a',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.4,
+            fill: false,
+            yAxisID: 'y',
+          },
+          // Ch2 — Clips B
+          {
+            label: 'Clips B Raw (mV)',
+            data: chState.ch2.rawHistory,
+            borderColor: '#6ea8fe',
+            backgroundColor: 'rgba(110, 168, 254, 0.06)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.3,
+            fill: true,
+            yAxisID: 'y',
+          },
+          {
+            label: 'Clips B Smooth',
+            data: chState.ch2.smoothedHistory,
+            borderColor: '#a78bfa',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.4,
+            fill: false,
+            yAxisID: 'y',
+          },
+          // Ch3 — TENS Pads
+          {
+            label: 'TENS Raw (mV)',
+            data: chState.ch3.rawHistory,
+            borderColor: '#f472b6',
+            backgroundColor: 'rgba(244, 114, 182, 0.06)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.3,
+            fill: true,
+            yAxisID: 'y',
+          },
+          {
+            label: 'TENS Smooth',
+            data: chState.ch3.smoothedHistory,
+            borderColor: '#fbbf24',
             backgroundColor: 'transparent',
             borderWidth: 2,
             pointRadius: 0,
@@ -3335,9 +4179,17 @@
       };
 
       eventSource.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.ch && msg.v !== undefined) {
+            handleSensorData({ id: 'sensor-plant_signal', channel: msg.ch, value: msg.v });
+            return;
+          }
+        } catch(e) {}
+        // Fallback: plain float (legacy single-channel)
         const value = parseFloat(event.data);
         if (!isNaN(value)) {
-          handleSensorData({ id: 'sensor-plant_signal', value });
+          handleSensorData({ id: 'sensor-plant_signal', channel: 'ch1', value });
         }
       };
 
@@ -3392,47 +4244,66 @@
 
       const now = new Date();
       const value = parseFloat(data.value);
+      const ch = data.channel || 'ch1';
 
       if (isNaN(value)) return;
+      if (!chState[ch]) return;
 
-      const id = data.id;
+      const st = chState[ch];
+      st.connected = true;
 
-      if (id === 'sensor-plant_signal') {
-        // ESP32 sends raw volts — convert to mV and process everything here
-        const mV = value * 1000;
+      // ESP32 sends raw volts — convert to mV and process everything here
+      const mV = value * 1000;
 
-        // Sliding window moving average (was on ESP32)
-        rawWindow.push(mV);
-        if (rawWindow.length > RAW_WINDOW_SIZE) rawWindow.shift();
-        const avgMv = rawWindow.reduce((a, b) => a + b, 0) / rawWindow.length;
+      // Sliding window moving average
+      st.rawWindow.push(mV);
+      if (st.rawWindow.length > RAW_WINDOW_SIZE) st.rawWindow.shift();
+      const avgMv = st.rawWindow.reduce((a, b) => a + b, 0) / st.rawWindow.length;
 
-        rawHistory.push({ x: now, y: avgMv });
-        updateRawStats(avgMv);
+      st.rawHistory.push({ x: now, y: avgMv });
+      st.currentRawValue = avgMv;
+
+      // Per-channel stats
+      if (avgMv < st.rawMin) st.rawMin = avgMv;
+      if (avgMv > st.rawMax) st.rawMax = avgMv;
+      st.rawSum += avgMv;
+      st.rawCount++;
+
+      // EMA smoothing
+      if (!st.emaInitialized) {
+        st.emaSmoothed = avgMv;
+        st.emaInitialized = true;
+      } else {
+        st.emaSmoothed = EMA_ALPHA * avgMv + (1 - EMA_ALPHA) * st.emaSmoothed;
+      }
+      st.currentSmoothed = st.emaSmoothed;
+      st.smoothedHistory.push({ x: now, y: st.emaSmoothed });
+
+      // Activity level (rate of change, with spike protection)
+      const rawDelta = Math.abs(avgMv - st.lastRawForActivity);
+      st.lastRawForActivity = avgMv;
+      const delta = Math.min(rawDelta, 10);
+      const pct = Math.min(100, (delta / 15) * 100);
+      st.currentActivity += (pct - st.currentActivity) * 0.3;
+
+      // Update channel indicator
+      const dot = document.getElementById('ch-dot-' + ch);
+      const val = document.getElementById('ch-val-' + ch);
+      if (dot) dot.style.opacity = '1';
+      if (val) val.textContent = avgMv.toFixed(2) + ' mV';
+
+      // Update primary display from ch1 (synth control channel)
+      if (ch === activeChannel) {
         currentRawValue = avgMv;
-        // tempo detection removed — sequencer uses activity-based timing
+        currentSmoothed = st.emaSmoothed;
+        currentActivity = st.currentActivity;
+        rawMin = st.rawMin;
+        rawMax = st.rawMax;
+
         document.getElementById('rawValue').innerHTML =
           `${avgMv.toFixed(3)} <span class="unit">mV</span>`;
-
-        // EMA smoothing
-        if (!emaInitialized) {
-          emaSmoothed = avgMv;
-          emaInitialized = true;
-        } else {
-          emaSmoothed = EMA_ALPHA * avgMv + (1 - EMA_ALPHA) * emaSmoothed;
-        }
-        currentSmoothed = emaSmoothed;
-        smoothedHistory.push({ x: now, y: emaSmoothed });
         document.getElementById('smoothedValue').innerHTML =
-          `${emaSmoothed.toFixed(2)} <span class="unit">mV</span>`;
-
-        // Activity level (rate of change, with spike protection)
-        const rawDelta = Math.abs(avgMv - lastRawForActivity);
-        lastRawForActivity = avgMv;
-        // Clamp delta to ignore massive outlier spikes (>10mV is artifact, not plant)
-        const delta = Math.min(rawDelta, 10);
-        const pct = Math.min(100, (delta / 15) * 100);
-        // Smooth activity — can rise moderately fast but never instantly
-        currentActivity += (pct - currentActivity) * 0.3;
+          `${st.emaSmoothed.toFixed(2)} <span class="unit">mV</span>`;
         document.getElementById('activityFill').style.width = pct + '%';
         document.getElementById('activityValue').textContent = pct.toFixed(1) + '%';
 
@@ -3444,12 +4315,16 @@
         } else {
           fill.style.background = 'linear-gradient(90deg, #064e3b, #059669, #34d399)';
         }
+
+        updateRawStats(avgMv);
       }
 
-      // Trim old data outside window
+      // Trim old data outside window (all channels)
       const cutoff = new Date(now.getTime() - windowSeconds * 1000);
-      trimData(rawHistory, cutoff);
-      trimData(smoothedHistory, cutoff);
+      for (const s of Object.values(chState)) {
+        trimData(s.rawHistory, cutoff);
+        trimData(s.smoothedHistory, cutoff);
+      }
 
       chart.update('none');
     }

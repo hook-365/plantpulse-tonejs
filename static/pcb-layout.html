@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlantPulse v2 — PCB Layout</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #080b12;
+      color: #c8d0e0;
+      font-family: 'IBM Plex Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px 20px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 30% 20%, rgba(52,211,153,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 70% 80%, rgba(212,149,106,0.03) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 300;
+      font-size: 28px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #e8ecf4;
+      margin-bottom: 4px;
+    }
+
+    h1 span { color: #34d399; font-weight: 600; }
+
+    .subtitle {
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #4a5568;
+      margin-bottom: 24px;
+    }
+
+    .board-wrapper {
+      position: relative;
+      background: #0c1018;
+      border: 1px solid #1a2540;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow:
+        0 0 60px rgba(0,0,0,0.5),
+        inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+
+    .tooltip {
+      position: fixed;
+      pointer-events: none;
+      background: #141c2e;
+      border: 1px solid #2a3d5e;
+      color: #e8ecf4;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 4px;
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.12s;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    .tooltip.visible { opacity: 1; }
+    .tooltip .coord { color: #d4956a; font-weight: 600; }
+    .tooltip .pin-name { color: #34d399; }
+
+    /* Legend */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 20px;
+      padding: 14px 20px;
+      background: #0c1018;
+      border: 1px solid #1a2540;
+      border-radius: 8px;
+      max-width: 740px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      color: #6a7a9a;
+    }
+    .legend-swatch {
+      width: 20px;
+      height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 2px solid;
+    }
+
+    .toggle-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .toggle-btn {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 6px 14px;
+      border-radius: 4px;
+      border: 1px solid #2a3d5e;
+      background: #0a0f18;
+      color: #5a6a8a;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .toggle-btn:hover { border-color: #d4956a; color: #d4956a; }
+    .toggle-btn.active { border-color: #d4956a; color: #e8c8a0; background: rgba(212,149,106,0.1); }
+  </style>
+</head>
+<body>
+
+<h1>Plant<span>Pulse</span> v2</h1>
+<div class="subtitle">Perfboard Layout &mdash; Solder Side Trace Map</div>
+
+<div class="board-wrapper">
+  <svg id="board" width="700" height="540"></svg>
+</div>
+
+<div class="tooltip" id="tooltip">
+  <span class="coord" id="ttCoord">A1</span>
+  <span class="pin-name" id="ttPin"></span>
+</div>
+
+<div class="toggle-row">
+  <button class="toggle-btn active" data-trace="power" onclick="toggleTrace('power')">3.3V</button>
+  <button class="toggle-btn active" data-trace="gnd" onclick="toggleTrace('gnd')">GND</button>
+  <button class="toggle-btn active" data-trace="sda" onclick="toggleTrace('sda')">SDA</button>
+  <button class="toggle-btn active" data-trace="scl" onclick="toggleTrace('scl')">SCL</button>
+  <button class="toggle-btn active" data-trace="addr" onclick="toggleTrace('addr')">ADDR</button>
+  <button class="toggle-btn active" data-trace="electrodes" onclick="toggleTrace('electrodes')">Electrodes</button>
+  <button class="toggle-btn" onclick="toggleAll()">Toggle All</button>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#ef4444"></div>3.3V Power</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#6b7280"></div>GND</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#3b82f6"></div>SDA (D21)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#22c55e"></div>SCL (D22)</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#f97316;height:2px;border:1px dashed #f97316;background:none"></div>ADDR Bridge</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:#34d399;background:rgba(52,211,153,0.15)"></div>Clips A (A0,A1)</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:#6ea8fe;background:rgba(110,168,254,0.15)"></div>Clips B (A2,A3)</div>
+  <div class="legend-item"><div class="legend-dot" style="border-color:#f472b6;background:rgba(244,114,182,0.15)"></div>TENS Pads (A0,A1)</div>
+</div>
+
+<script>
+const COLS = 'ABCDEFGHIJKLMN'.split('');
+const ROWS = Array.from({length: 18}, (_, i) => i + 1);
+const PAD = 40;
+const CELL = 34;
+const svg = document.getElementById('board');
+const NS = 'http://www.w3.org/2000/svg';
+
+// Pin maps
+const pinMap = {};
+
+// ADS1115 #1 — row 16
+const ads1Pins = ['A3','A2','A1','A0','ALRT','ADDR','SDA','SCL','GND','VDD'];
+ads1Pins.forEach((name, i) => { pinMap[COLS[i] + '16'] = { chip: 'ADS#1', pin: name }; });
+
+// ADS1115 #2 — row 7
+const ads2Pins = ['A3','A2','A1','A0','ALRT','ADDR','SDA','SCL','GND','VDD'];
+ads2Pins.forEach((name, i) => { pinMap[COLS[i] + '7'] = { chip: 'ADS#2', pin: name }; });
+
+// ESP32 — column N (key pins only for display)
+const esp32Pins = {
+  'N15': '3V3', 'N14': 'GND', 'N13': 'D15', 'N12': 'D2', 'N11': 'D4',
+  'N10': 'D16', 'N9': 'D17', 'N8': 'D5', 'N7': 'D18', 'N6': 'D21/SDA',
+  'N5': 'D19', 'N4': 'RX0', 'N3': 'D22/SCL', 'N2': 'TX0', 'N1': 'D23',
+};
+Object.entries(esp32Pins).forEach(([coord, pin]) => {
+  pinMap[coord] = { chip: 'ESP32', pin };
+});
+
+function colIdx(c) { return COLS.indexOf(c); }
+function cx(col) { return PAD + colIdx(col) * CELL + CELL/2; }
+function cy(row) { return PAD + (18 - row) * CELL + CELL/2; }
+
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  Object.entries(attrs).forEach(([k,v]) => e.setAttribute(k, v));
+  return e;
+}
+
+// Draw board background
+const boardBg = el('rect', {
+  x: PAD - 10, y: PAD - 10,
+  width: COLS.length * CELL + 20, height: ROWS.length * CELL + 20,
+  rx: 6, fill: '#0f3328', opacity: 0.25, stroke: '#1a4a35', 'stroke-width': 1
+});
+svg.appendChild(boardBg);
+
+// Mounting holes
+[[PAD - 2, PAD - 2], [PAD + COLS.length * CELL + 2, PAD - 2],
+ [PAD - 2, PAD + ROWS.length * CELL + 2], [PAD + COLS.length * CELL + 2, PAD + ROWS.length * CELL + 2]].forEach(([x,y]) => {
+  svg.appendChild(el('circle', { cx: x, cy: y, r: 5, fill: 'none', stroke: '#1a3a2e', 'stroke-width': 1.5 }));
+});
+
+// Column labels (top)
+COLS.forEach((c, i) => {
+  const t = el('text', {
+    x: PAD + i * CELL + CELL/2, y: PAD - 16,
+    'text-anchor': 'middle', fill: '#3a4a6a', 'font-size': 10,
+    'font-family': 'IBM Plex Mono, monospace', 'font-weight': 500
+  });
+  t.textContent = c;
+  svg.appendChild(t);
+});
+
+// Row labels (left)
+ROWS.forEach((r) => {
+  const t = el('text', {
+    x: PAD - 16, y: cy(r) + 4,
+    'text-anchor': 'middle', fill: '#3a4a6a', 'font-size': 10,
+    'font-family': 'IBM Plex Mono, monospace', 'font-weight': 500
+  });
+  t.textContent = r;
+  svg.appendChild(t);
+});
+
+// Draw holes
+COLS.forEach((c) => {
+  ROWS.forEach((r) => {
+    const coord = c + r;
+    const hole = el('circle', {
+      cx: cx(c), cy: cy(r), r: 4.5,
+      fill: '#0a1510', stroke: '#1a3a2e', 'stroke-width': 0.8,
+      'data-coord': coord, class: 'hole'
+    });
+    hole.addEventListener('mouseenter', (e) => showTooltip(e, coord));
+    hole.addEventListener('mouseleave', hideTooltip);
+    svg.appendChild(hole);
+  });
+});
+
+// Component outlines
+function drawChipOutline(label, cols, row, color) {
+  const x1 = cx(cols[0]) - 14;
+  const x2 = cx(cols[cols.length - 1]) + 14;
+  const y1 = cy(row) - 12;
+  const h = 24;
+  const g = el('g', { class: 'chip-outline' });
+  g.appendChild(el('rect', {
+    x: x1, y: y1, width: x2 - x1, height: h,
+    rx: 3, fill: 'none', stroke: color, 'stroke-width': 1.2,
+    'stroke-dasharray': '4 2', opacity: 0.6
+  }));
+  const t = el('text', {
+    x: (x1 + x2) / 2, y: y1 - 5,
+    'text-anchor': 'middle', fill: color, 'font-size': 9,
+    'font-family': 'Outfit, sans-serif', 'font-weight': 600,
+    'letter-spacing': '1.5', opacity: 0.8
+  });
+  t.textContent = label;
+  g.appendChild(t);
+  svg.appendChild(g);
+}
+
+drawChipOutline('ADS1115 #1 (0x48) — CLIPS', COLS.slice(0, 10), 16, '#6ea8fe');
+drawChipOutline('ADS1115 #2 (0x49) — TENS', COLS.slice(0, 10), 7, '#f472b6');
+
+// ESP32 outline
+const espX = cx('N') - 20;
+const espY1 = cy(15) - 14;
+const espY2 = cy(1) + 14;
+svg.appendChild(el('rect', {
+  x: espX, y: espY1, width: 46, height: espY2 - espY1,
+  rx: 3, fill: 'none', stroke: '#d4956a', 'stroke-width': 1.2,
+  'stroke-dasharray': '4 2', opacity: 0.6
+}));
+const espLabel = el('text', {
+  x: espX + 23, y: espY1 - 5,
+  'text-anchor': 'middle', fill: '#d4956a', 'font-size': 9,
+  'font-family': 'Outfit, sans-serif', 'font-weight': 600,
+  'letter-spacing': '1.5', opacity: 0.8
+});
+espLabel.textContent = 'ESP32';
+svg.appendChild(espLabel);
+
+// Pin labels on the board
+function drawPinLabel(col, row, text, color, anchor, dx) {
+  const t = el('text', {
+    x: cx(col) + (dx || 0), y: cy(row) + 3.5,
+    'text-anchor': anchor || 'middle', fill: color, 'font-size': 7,
+    'font-family': 'IBM Plex Mono, monospace', 'font-weight': 400,
+    opacity: 0.5
+  });
+  t.textContent = text;
+  svg.appendChild(t);
+}
+
+// ADS#1 pin labels (above row 16)
+ads1Pins.forEach((name, i) => {
+  drawPinLabel(COLS[i], 17, name, '#6ea8fe', 'middle', 0);
+});
+// ADS#2 pin labels (below row 7)
+ads2Pins.forEach((name, i) => {
+  drawPinLabel(COLS[i], 6, name, '#f472b6', 'middle', 0);
+});
+
+// Traces
+const traceGroups = {};
+
+function tracePath(points, color, width, dash, groupName) {
+  const g = traceGroups[groupName] || (traceGroups[groupName] = el('g', { class: 'trace-group', 'data-trace': groupName }));
+  if (!g.parentNode) svg.appendChild(g);
+
+  // Glow
+  const glow = el('path', {
+    d: buildPath(points), fill: 'none', stroke: color, 'stroke-width': width + 4,
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    opacity: 0.15, filter: 'blur(3px)'
+  });
+  if (dash) glow.setAttribute('stroke-dasharray', dash);
+  g.appendChild(glow);
+
+  // Main trace
+  const path = el('path', {
+    d: buildPath(points), fill: 'none', stroke: color, 'stroke-width': width,
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.85
+  });
+  if (dash) path.setAttribute('stroke-dasharray', dash);
+  g.appendChild(path);
+
+  // Endpoint dots
+  [points[0], points[points.length - 1]].forEach(([c, r]) => {
+    g.appendChild(el('circle', {
+      cx: cx(c), cy: cy(r), r: 5,
+      fill: color, opacity: 0.25
+    }));
+  });
+
+  return g;
+}
+
+function buildPath(points) {
+  return points.map(([c, r], i) => `${i === 0 ? 'M' : 'L'} ${cx(c)} ${cy(r)}`).join(' ');
+}
+
+// Trace 1: 3.3V (RED) — N15 → J15 → J16 → J7
+tracePath([['N',15],['J',15],['J',16],['J',7]], '#ef4444', 2.5, null, 'power');
+
+// Trace 2: GND (GRAY) — N14 → I14 → I16 → I7
+tracePath([['N',14],['I',14],['I',16],['I',7]], '#6b7280', 2.5, null, 'gnd');
+
+// Trace 3: SDA (BLUE) — N6 → G6 → G7 → G16
+tracePath([['N',6],['G',6],['G',7],['G',16]], '#3b82f6', 2.5, null, 'sda');
+
+// Trace 4: SCL (GREEN) — N3 → H3 → H7 → H16
+tracePath([['N',3],['H',3],['H',7],['H',16]], '#22c55e', 2.5, null, 'scl');
+
+// ADDR bridges (ORANGE dashed)
+tracePath([['F',16],['I',16]], '#f97316', 1.5, '4 3', 'addr');
+tracePath([['F',7],['J',7]], '#f97316', 1.5, '4 3', 'addr');
+
+// ADDR labels
+function drawAddrLabel(col, row, text, yOff) {
+  const g = traceGroups['addr'];
+  const t = el('text', {
+    x: (cx('F') + cx(col)) / 2, y: cy(row) + yOff,
+    'text-anchor': 'middle', fill: '#f97316', 'font-size': 8,
+    'font-family': 'IBM Plex Mono, monospace', 'font-weight': 500, opacity: 0.7
+  });
+  t.textContent = text;
+  g.appendChild(t);
+}
+drawAddrLabel('I', 16, 'ADDR→GND (0x48)', -12);
+drawAddrLabel('J', 7, 'ADDR→VDD (0x49)', -12);
+
+// Electrode connection points
+function drawElectrode(col, row, color, label, groupName) {
+  const g = traceGroups[groupName] || (traceGroups[groupName] = el('g', { class: 'trace-group', 'data-trace': groupName }));
+  if (!g.parentNode) svg.appendChild(g);
+
+  // Outer ring
+  g.appendChild(el('circle', {
+    cx: cx(col), cy: cy(row), r: 8,
+    fill: 'none', stroke: color, 'stroke-width': 2, opacity: 0.6
+  }));
+  // Inner glow
+  g.appendChild(el('circle', {
+    cx: cx(col), cy: cy(row), r: 4,
+    fill: color, opacity: 0.2
+  }));
+  // Wire trailing left
+  g.appendChild(el('line', {
+    x1: cx(col) - 8, y1: cy(row), x2: cx(col) - 22, y2: cy(row),
+    stroke: color, 'stroke-width': 1.5, opacity: 0.5,
+    'stroke-linecap': 'round'
+  }));
+  // Label
+  const t = el('text', {
+    x: cx(col) - 25, y: cy(row) + 3,
+    'text-anchor': 'end', fill: color, 'font-size': 7.5,
+    'font-family': 'Outfit, sans-serif', 'font-weight': 600,
+    'letter-spacing': '0.5', opacity: 0.8
+  });
+  t.textContent = label;
+  g.appendChild(t);
+}
+
+drawElectrode('D', 16, '#34d399', 'CLIP A+', 'electrodes');
+drawElectrode('C', 16, '#34d399', 'CLIP A\u2212', 'electrodes');
+drawElectrode('B', 16, '#6ea8fe', 'CLIP B+', 'electrodes');
+drawElectrode('A', 16, '#6ea8fe', 'CLIP B\u2212', 'electrodes');
+drawElectrode('D', 7, '#f472b6', 'TENS +', 'electrodes');
+drawElectrode('C', 7, '#f472b6', 'TENS \u2212', 'electrodes');
+
+// Highlight connected pads
+const connectedPads = {
+  'N15': '#ef4444', 'J15': '#ef4444', 'J16': '#ef4444', 'J7': '#ef4444',
+  'N14': '#6b7280', 'I14': '#6b7280', 'I16': '#6b7280', 'I7': '#6b7280',
+  'N6': '#3b82f6', 'G6': '#3b82f6', 'G7': '#3b82f6', 'G16': '#3b82f6',
+  'N3': '#22c55e', 'H3': '#22c55e', 'H7': '#22c55e', 'H16': '#22c55e',
+  'F16': '#f97316', 'F7': '#f97316',
+  'D16': '#34d399', 'C16': '#34d399', 'B16': '#6ea8fe', 'A16': '#6ea8fe',
+  'D7': '#f472b6', 'C7': '#f472b6',
+};
+
+document.querySelectorAll('.hole').forEach(hole => {
+  const coord = hole.getAttribute('data-coord');
+  if (connectedPads[coord]) {
+    hole.setAttribute('fill', connectedPads[coord]);
+    hole.setAttribute('fill-opacity', '0.35');
+    hole.setAttribute('stroke', connectedPads[coord]);
+    hole.setAttribute('stroke-opacity', '0.6');
+    hole.setAttribute('r', '5.5');
+  }
+});
+
+// Tooltip
+const tooltip = document.getElementById('tooltip');
+const ttCoord = document.getElementById('ttCoord');
+const ttPin = document.getElementById('ttPin');
+
+function showTooltip(e, coord) {
+  ttCoord.textContent = coord;
+  const info = pinMap[coord];
+  if (info) {
+    ttPin.textContent = ` \u2014 ${info.chip} ${info.pin}`;
+  } else {
+    ttPin.textContent = '';
+  }
+  tooltip.style.left = (e.clientX + 14) + 'px';
+  tooltip.style.top = (e.clientY - 8) + 'px';
+  tooltip.classList.add('visible');
+
+  // Highlight hole
+  e.target.setAttribute('r', '7');
+  e.target.style.filter = 'drop-shadow(0 0 4px rgba(212,149,106,0.5))';
+}
+
+function hideTooltip(e) {
+  tooltip.classList.remove('visible');
+  const coord = e.target.getAttribute('data-coord');
+  e.target.setAttribute('r', connectedPads[coord] ? '5.5' : '4.5');
+  e.target.style.filter = '';
+}
+
+// Toggle traces
+const traceVisibility = { power: true, gnd: true, sda: true, scl: true, addr: true, electrodes: true };
+
+function toggleTrace(name) {
+  traceVisibility[name] = !traceVisibility[name];
+  const g = traceGroups[name];
+  if (g) g.style.display = traceVisibility[name] ? '' : 'none';
+  const btn = document.querySelector(`[data-trace="${name}"]`);
+  if (btn) btn.classList.toggle('active', traceVisibility[name]);
+}
+
+function toggleAll() {
+  const anyOn = Object.values(traceVisibility).some(v => v);
+  Object.keys(traceVisibility).forEach(k => {
+    traceVisibility[k] = !anyOn;
+    const g = traceGroups[k];
+    if (g) g.style.display = traceVisibility[k] ? '' : 'none';
+    const btn = document.querySelector(`[data-trace="${k}"]`);
+    if (btn) btn.classList.toggle('active', traceVisibility[k]);
+  });
+}
+</script>
+
+</body>
+</html>

@@ -35,7 +35,11 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))
 MQTT_USER = os.environ.get("MQTT_USER", "plantpulse")
 MQTT_PASS = os.environ.get("MQTT_PASS", "")
-MQTT_TOPIC = "plantpulse/sensor/plant_signal/state"
+MQTT_TOPICS = {
+    "plantpulse/sensor/plant_signal/state": "ch1",    # Chip 1 A0-A1, alligator clips
+    "plantpulse/sensor/plant_signal_2/state": "ch2",  # Chip 1 A2-A3, alligator clips
+    "plantpulse/sensor/plant_signal_3/state": "ch3",  # Chip 2 A0-A1, TENS pads
+}
 
 
 # --- MQTT → SSE fan-out ---
@@ -46,14 +50,17 @@ _clients = []  # list of Queue objects, one per SSE connection
 
 def _on_connect(client, userdata, flags, rc):
     if rc == 0:
-        log.info("MQTT connected, subscribing to %s", MQTT_TOPIC)
-        client.subscribe(MQTT_TOPIC)
+        for topic in MQTT_TOPICS:
+            log.info("MQTT subscribing to %s", topic)
+            client.subscribe(topic)
     else:
         log.warning("MQTT connect failed rc=%d", rc)
 
 
 def _on_message(client, userdata, msg):
-    payload = msg.payload.decode()
+    channel = MQTT_TOPICS.get(msg.topic, "ch1")
+    value = msg.payload.decode()
+    payload = json.dumps({"ch": channel, "v": float(value)})
     with _clients_lock:
         dead = []
         for q in _clients:

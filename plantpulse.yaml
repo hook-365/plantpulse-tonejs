@@ -39,17 +39,45 @@ i2c:
   scl: GPIO22
   scan: true
 
-# ADS1115 16-bit ADC with PGA
+# ADS1115 16-bit ADCs with PGA
+# Chip 1 (ADDR→GND): alligator clips
+# Chip 2 (ADDR→VDD): TENS sticky pads
 ads1115:
   - address: 0x48
+    id: ads_clips
+  - address: 0x49
+    id: ads_pads
 
 sensor:
-  # Raw differential ADC reading (A0-A1) — no filters, browser does all processing
+  # Chip 1 (0x48), differential A0-A1 — alligator clips (original)
   - platform: ads1115
+    ads1115_id: ads_clips
     multiplexer: 'A0_A1'
-    gain: 0.256               # ±256mV range for max resolution on plant signals
+    gain: 0.256
     name: "Plant Signal"
     id: plant_signal
-    update_interval: 250ms    # 4 readings/sec — balanced for ESP32 WiFi stability
+    update_interval: 250ms
+    unit_of_measurement: "V"
+    accuracy_decimals: 6
+
+  # Chip 1 (0x48), differential A2-A3 — alligator clips (second pair)
+  - platform: ads1115
+    ads1115_id: ads_clips
+    multiplexer: 'A2_A3'
+    gain: 0.256
+    name: "Plant Signal 2"
+    id: plant_signal_2
+    update_interval: 250ms
+    unit_of_measurement: "V"
+    accuracy_decimals: 6
+
+  # Chip 2 (0x49), differential A0-A1 — TENS sticky pads
+  - platform: ads1115
+    ads1115_id: ads_pads
+    multiplexer: 'A0_A1'
+    gain: 0.256
+    name: "Plant Signal 3"
+    id: plant_signal_3
+    update_interval: 250ms
     unit_of_measurement: "V"
     accuracy_decimals: 6
