@@ -240,12 +240,17 @@ def stream():
         with _clients_lock:
             _clients.append(q)
         try:
+            # Short queue timeout + heartbeat-as-data so client watchdog knows
+            # the server is alive even when MQTT is quiet. Comment-based (:kp)
+            # keepalives don't fire EventSource.onmessage, so the client's
+            # stale watchdog would otherwise false-positive during quiet plant
+            # periods.
             while True:
                 try:
-                    data = q.get(timeout=30)
+                    data = q.get(timeout=5)
                     yield f"data: {data}\n\n"
                 except Empty:
-                    yield ": keepalive\n\n"
+                    yield f"data: {json.dumps({'hb': 1})}\n\n"
         except GeneratorExit:
             pass
         finally:

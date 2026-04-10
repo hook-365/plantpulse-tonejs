@@ -1840,6 +1840,9 @@
     // Ambient presets without _track just run forever on the initial motif.
     let trackStartTime = 0;
     let trackNumber = 1;
+    // Track transition state — true during the ~2 second breath between tracks.
+    // Used to gate kick sidechain so it doesn't override the master fade dip.
+    let _trackTransitioning = false;
 
     // Per-tick smoothing — called from musicTick
     function smoothVoiceLevels() {
@@ -1879,6 +1882,70 @@
         _crashSynth.triggerAttackRelease('2n', undefined, velocity);
         logNoteEvent('crash', velocity, 'perc');
       } catch (e) {}
+    }
+
+    // Start the breakdown riser — filtered noise that sweeps up and swells over
+    // the breakdown duration. The plant's activity during the breakdown drives
+    // the riser's volume, converting plant energy into musical tension.
+    function fireBreakdownRiser(durationSec) {
+      if (!riserNoise || !riserGain || !riserFilter) return;
+      try {
+        const tNow = Tone.now();
+        if (!_riserActive) {
+          riserNoise.start(tNow);
+          _riserActive = true;
+        }
+        // Filter sweep from 200Hz → 8kHz over the breakdown duration (exponential
+        // for more dramatic feel near the top)
+        riserFilter.frequency.cancelScheduledValues(tNow);
+        riserFilter.frequency.setValueAtTime(200, tNow);
+        riserFilter.frequency.exponentialRampToValueAtTime(8000, tNow + durationSec);
+        // Reset accumulated activity — will build during the breakdown
+        _breakdownActivity = 0;
+        // Start silent, will be modulated per-bar by updateBreakdownRiser based
+        // on accumulated activity
+        riserGain.gain.cancelScheduledValues(tNow);
+        riserGain.gain.setValueAtTime(0, tNow);
+      } catch (e) {}
+    }
+
+    // Per-bar update during an active breakdown. Accumulates activity and
+    // ramps the riser gain proportionally. High plant activity = loud riser.
+    function updateBreakdownRiser() {
+      if (!_riserActive || !riserGain) return;
+      _breakdownActivity += currentActivity;
+      // Target gain scales with accumulated activity, capped at 0.35
+      const target = Math.min(0.35, _breakdownActivity / 250);
+      try {
+        riserGain.gain.rampTo(target, 0.3);
+      } catch (e) {}
+    }
+
+    // Stop the riser — called on section transition OUT of a breakdown.
+    // Returns the accumulated activity so the caller can use it to boost the
+    // next section's entry crash intensity.
+    function stopRiser() {
+      if (!_riserActive || !riserNoise || !riserGain) return 0;
+      try {
+        const tNow = Tone.now();
+        riserGain.gain.cancelScheduledValues(tNow);
+        riserGain.gain.linearRampToValueAtTime(0, tNow + 0.15);
+        setTimeout(() => {
+          try { riserNoise.stop(); } catch (_) {}
+          _riserActive = false;
+        }, 200);
+      } catch (e) {}
+      const accumulated = _breakdownActivity;
+      _breakdownActivity = 0;
+      return accumulated;
+    }
+
+    // Helper: is this section a "breakdown" / tension build?
+    function isBreakdownSection(section) {
+      if (!section) return false;
+      if (section.drumStyle === 'drop') return true;
+      const nm = (section.name || '').toLowerCase();
+      return /breakdown|break|drop/.test(nm);
     }
 
     // Called at each bar start — rotates sections based on preset arrangement
@@ -1923,16 +1990,33 @@
       );
 
       if (forceTransition || spikeTrigger) {
+        // === TRACK END CHECK — BEFORE the normal section advance ===
+        // If this section boundary would also trigger a track end, we want to skip
+        // the normal advance (no brief intro fragment before the fade) and go
+        // straight into the track transition.
+        if (shouldEndTrackAt(arr)) {
+          // Stop any active riser cleanly so it doesn't cut off mid-sweep
+          if (_riserActive) stopRiser();
+          maybeEndTrack();  // runs fade + regen + resets section to 0
+          return; // skip normal section advance
+        }
+
         const prevName = curSec.name;
+        const wasBreakdown = isBreakdownSection(curSec);
         currentSectionIdx = (currentSectionIdx + 1) % arr.sections.length;
         sectionBarCount = 0;
         const section = arr.sections[currentSectionIdx];
+        const nowBreakdown = isBreakdownSection(section);
         // Set targets — smoothing ramps voiceLevels to match
         for (const voice in section.voices) {
           if (voiceLevelsTarget[voice] !== undefined) {
             voiceLevelsTarget[voice] = section.voices[voice];
           }
         }
+
+        // Breakdown riser — DISABLED for now (felt out of place).
+        // Breakdowns are pure "cut" style: sudden silence into the next section.
+
         // Entry accent — fires a crash cymbal to announce the new section audibly.
         // Defaults: 'crash' on named sections that typically lift (chorus/return/fuller).
         // Presets can set `entryAccent: 'crash' | 'none'` explicitly.
@@ -1948,64 +2032,131 @@
           `%cshift=${section.octaveShift||0} boost=${section.percBoost||1} accent=${accent}`,
           'color:#f472b6;font-weight:bold;font-size:13px', 'color:#fbbf24', 'color:#8896b0', 'color:#60a5fa'
         );
-
-        // === TRACK LIFECYCLE CHECK ===
-        // If preset has a _track config and we've played long enough, regenerate
-        // the motif + bass riff to start a "new track" with fresh DNA.
-        // Triggers on natural section wrap (back to index 0) past minDuration,
-        // or force-fires if maxDuration exceeded regardless of section index.
-        maybeEndTrack();
       }
+    }
+
+    // Predicate: would this section boundary also end the track?
+    // Called BEFORE the normal section advance so we can skip the advance and
+    // go directly into the track transition (no brief intro fragment before fade).
+    function shouldEndTrackAt(arr) {
+      if (_trackTransitioning) return false;
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const track = preset && preset._track;
+      if (!track) return false;
+      if (trackStartTime === 0 || (Date.now() - trackStartTime) > 24 * 3600 * 1000) return false;
+      const elapsed = (Date.now() - trackStartTime) / 1000;
+      if (elapsed >= track.maxDuration) return true;
+      // Would the NEXT section be 'intro' (index 0)? If so and past minDuration, end here.
+      const nextIdx = (currentSectionIdx + 1) % arr.sections.length;
+      if (elapsed >= track.minDuration && nextIdx === 0) return true;
+      return false;
     }
 
     // Regenerates the motif and bass riff from current plant state, resets the
     // track timer, and logs the new track number. Called from updateArrangementSection
     // when the track duration threshold has been met. If the preset declares a
     // rootPool, the key rotates through it — modulating between tracks like an album.
+    //
+    // Track transition has a 2-second "breath": masterGain dips to silence, the
+    // motif regenerates mid-silence, then fades back up. Gives tracks room to
+    // breathe instead of slamming from one into the next.
     let rootPoolIdx = 0;
     function maybeEndTrack() {
+      if (_trackTransitioning) return; // already fading out — don't re-trigger
       const preset = FACTORY_PRESETS[currentPresetName];
       const track = preset && preset._track;
       if (!track) return;  // ambient presets have no _track, never end
+      // Safety: if trackStartTime is 0 (never initialized) or wildly in the past,
+      // initialize it now and early-return. Prevents the "56-year elapsed" bug
+      // where a restored preset with uninitialized trackStartTime fires track-end
+      // on the first section wrap.
+      if (trackStartTime === 0 || (Date.now() - trackStartTime) > 24 * 3600 * 1000) {
+        trackStartTime = Date.now();
+        return;
+      }
       const elapsed = (Date.now() - trackStartTime) / 1000;
-      // Wrap-to-intro means: section index just became 0
       const wrappedToIntro = (currentSectionIdx === 0);
       const pastMin = elapsed >= track.minDuration;
       const pastMax = elapsed >= track.maxDuration;
       if (!(pastMax || (pastMin && wrappedToIntro))) return;
 
-      trackNumber += 1;
-      trackStartTime = Date.now();
+      // === TRANSITION BEGINS ===
+      _trackTransitioning = true;
       const prevIntervals = currentMotif ? currentMotif.intervals.slice() : [];
       const prevRoot = document.getElementById('rootSelect')?.value || '?';
 
-      // Rotate the key if the preset defines a rootPool
-      let newRoot = prevRoot;
-      if (track.rootPool && track.rootPool.length > 0) {
-        rootPoolIdx = (rootPoolIdx + 1) % track.rootPool.length;
-        newRoot = track.rootPool[rootPoolIdx];
-        const rootSel = document.getElementById('rootSelect');
-        if (rootSel) rootSel.value = newRoot;
-        buildNotePool(); // rebuild scale notes in the new key
+      // Tempo-relative breath: 2 full bars of silence between tracks.
+      // Feels like "an actual break between songs" on an album.
+      //   lofi  70 BPM  → 6.9s silence, ~8s total transition
+      //   piano 72 BPM  → 6.7s silence
+      //   default 85   → 5.6s silence
+      //   organic 80   → 6.0s silence
+      //   pluck  95    → 5.1s silence
+      //   synthwave 110→ 4.4s silence
+      //   circuit 115  → 4.2s silence
+      const barMs = (60 / clockBPM) * 4 * 1000;
+      const silenceBars = 2;
+      const silenceMs = barMs * silenceBars;
+      const fadeDownMs = Math.min(600, barMs * 0.25);
+      const fadeUpMs   = Math.min(800, barMs * 0.35);
+      const totalMs = fadeDownMs + silenceMs + fadeUpMs;
+
+      // Schedule the master gain dip on the audio clock
+      if (masterGain) {
+        const tNow = Tone.now();
+        const savedLevel = clamp01(getModValue('amp_level'));
+        const fadeDownSec = fadeDownMs / 1000;
+        const silenceSec  = silenceMs / 1000;
+        const fadeUpSec   = fadeUpMs / 1000;
+        try {
+          masterGain.gain.cancelScheduledValues(tNow);
+          masterGain.gain.setValueAtTime(savedLevel, tNow);
+          masterGain.gain.linearRampToValueAtTime(0, tNow + fadeDownSec);
+          masterGain.gain.setValueAtTime(0, tNow + fadeDownSec + silenceSec);
+          masterGain.gain.linearRampToValueAtTime(savedLevel, tNow + fadeDownSec + silenceSec + fadeUpSec);
+        } catch (_) {}
       }
 
-      // Now regenerate motif/riff — they'll sample from the new (possibly transposed) state
-      currentMotif = generateMotif();
-      currentBassRiff = generateBassRiff();
+      // Regenerate the motif/riff/key mid-silence — well after fade-down, well
+      // before fade-up — so the new track is completely ready when audio resumes.
+      const regenAt = fadeDownMs + silenceMs * 0.4;
+      setTimeout(() => {
+        trackNumber += 1;
+        trackStartTime = Date.now();
 
-      // Force section back to 0 if maxDuration forced the end mid-cycle
-      if (pastMax && !wrappedToIntro) {
+        // Rotate the key if the preset defines a rootPool
+        let newRoot = prevRoot;
+        if (track.rootPool && track.rootPool.length > 0) {
+          rootPoolIdx = (rootPoolIdx + 1) % track.rootPool.length;
+          newRoot = track.rootPool[rootPoolIdx];
+          const rootSel = document.getElementById('rootSelect');
+          if (rootSel) rootSel.value = newRoot;
+          buildNotePool();
+        }
+
+        currentMotif = generateMotif();
+        currentBassRiff = generateBassRiff();
+
+        // Always reset to section 0 for a fresh start on the new track.
+        // percStep and barActivityWindow also reset so the new track starts
+        // cleanly at beat 0 of bar 0, not mid-measure.
         currentSectionIdx = 0;
         sectionBarCount = 0;
-      }
-      const keyChange = (newRoot !== prevRoot) ? ` %c[${prevRoot} → ${newRoot}]` : '';
-      const keyColor = 'color:#f472b6;font-weight:bold';
-      console.log(
-        `%c━━━ [track ${trackNumber}] %cnew motif for ${currentPresetName} ` +
-        `%cintervals=[${currentMotif.intervals.join(',')}] ` +
-        `%c(was [${prevIntervals.join(',')}], elapsed ${Math.round(elapsed)}s)` + keyChange,
-        'color:#fbbf24;font-weight:bold;font-size:14px', 'color:#a78bfa;font-weight:bold', 'color:#34d399', 'color:#8896b0', keyColor
-      );
+        percStep = 0;
+        barActivityWindow = [];
+
+        const keyChange = (newRoot !== prevRoot) ? ` %c[${prevRoot} → ${newRoot}]` : '';
+        const keyColor = 'color:#f472b6;font-weight:bold';
+        console.log(
+          `%c━━━ [track ${trackNumber}] %cnew motif for ${currentPresetName} ` +
+          `%cintervals=[${currentMotif.intervals.join(',')}] ` +
+          `%c(was [${prevIntervals.join(',')}], elapsed ${Math.round(elapsed)}s)` + keyChange,
+          'color:#fbbf24;font-weight:bold;font-size:14px', 'color:#a78bfa;font-weight:bold', 'color:#34d399', 'color:#8896b0', keyColor
+        );
+      }, regenAt);
+
+      // Clear the transition flag after the full fade completes
+      setTimeout(() => { _trackTransitioning = false; }, totalMs + 100);
     }
 
     // Reset section state when a preset loads
@@ -2013,6 +2164,8 @@
       currentSectionIdx = 0;
       sectionBarCount = 0;
       barActivityWindow = [];
+      // Stop any active riser from the previous preset
+      if (_riserActive) stopRiser();
       // First, reset all voices to 1.0 so old preset state doesn't bleed through
       for (const voice in voiceLevels) {
         voiceLevels[voice] = 1.0;
@@ -2047,6 +2200,12 @@
     let vinylNoise = null, vinylGain = null;
     // Dynamic panning
     let synthPanner = null; // pans the main (legacy) synth output
+    // Breakdown riser — persistent noise source + filter that harnesses plant
+    // activity during breakdown sections as tension build. Filter sweeps up,
+    // volume swells, releases into the next section for the drop.
+    let riserNoise = null, riserFilter = null, riserGain = null;
+    let _riserActive = false;
+    let _breakdownActivity = 0; // accumulated activity during current breakdown
 
     // --- Per-instrument (role) system ---
     // Each preset's _instruments config builds an `instruments` map of role → {synth, filter, dist, panner, gain, cfg, dispose, triggerAttackRelease}.
@@ -2089,6 +2248,14 @@
       }).connect(lowShelf).start();
 
       masterGain = new Tone.Gain(0.4).connect(stereoWidener);
+
+      // Breakdown riser — noise source + highpass filter for tension build.
+      // Routes to masterGain so the section dip/fade still affects it.
+      // Gain starts at 0; triggered manually from updateArrangementSection.
+      riserGain = new Tone.Gain(0).connect(masterGain);
+      riserFilter = new Tone.Filter({ frequency: 200, type: 'highpass', Q: 1.5 }).connect(riserGain);
+      riserNoise = new Tone.Noise('white').connect(riserFilter);
+      riserNoise.volume.value = -6; // base level before gain modulation
 
       // Sub-bass synth — follows bass notes an octave below, pure sine.
       // Dropped to 0.08 — the new kickSub layer now provides sub-range energy,
@@ -3208,20 +3375,33 @@
         const variationName = getCurrentVariation();
         const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
         const motif = variationFn(currentMotif);
-        // Per-section octave shift: chorus might lift +1 octave over verse
+        // Per-section octave shift: chorus might lift +1 octave over verse.
+        // Move the ENTIRE range up together so the chorus keeps the same width
+        // and doesn't open a 2-octave window. Previous version extended rangeEnd
+        // without moving rangeStart, which gave chorus a doubled range.
         const curSec = getCurrentSection();
         const octShift = (curSec && curSec.octaveShift) || 0;
         const shiftedBase = baseIdx + octShift * notesPerOctave;
-        // Expand range so an upward shift can actually reach higher notes
-        const shiftedRangeEnd = Math.min(currentNotes.length - 1, rangeEnd + Math.max(0, octShift) * notesPerOctave);
-        const shiftedRangeStart = Math.max(0, rangeStart + Math.min(0, octShift) * notesPerOctave);
-        // Convert motif intervals (scale degrees relative to root) to note indices
+        const shiftedRangeStart = Math.max(0, rangeStart + octShift * notesPerOctave);
+        const shiftedRangeEnd   = Math.min(currentNotes.length - 1, rangeEnd + octShift * notesPerOctave);
+        // Safety midi cap — no matter the scale, root, or octaveShift, melody
+        // notes should stay below G5 (midi 79). Anything higher is piercing on
+        // sawtooth/square leads. Notes above the cap get dropped an octave;
+        // notes below the floor get lifted.
+        const MAX_MELODY_MIDI = 79; // G5
+        const MIN_MELODY_MIDI = 55; // G3
         for (let i = 0; i < motif.intervals.length; i++) {
           const noteIdx = Math.max(shiftedRangeStart, Math.min(shiftedRangeEnd, shiftedBase + motif.intervals[i]));
+          let noteStr = currentNotes[noteIdx];
+          try {
+            let m = Tone.Frequency(noteStr).toMidi();
+            while (m > MAX_MELODY_MIDI) m -= 12;
+            while (m < MIN_MELODY_MIDI) m += 12;
+            noteStr = Tone.Frequency(m, 'midi').toNote();
+          } catch (_) {}
           const vel = Math.max(0.12, style.velStart - (i * style.velFade) + (i === 0 ? 0.04 : 0));
-          // Rhythm value (1/2/3) becomes gate multiplier
           const gate = style.gateBase * motif.rhythm[i] + (Math.random() * 0.05 - 0.025);
-          notes.push({ note: currentNotes[noteIdx], vel, gate });
+          notes.push({ note: noteStr, vel, gate });
         }
         return notes;
       }
@@ -3451,6 +3631,7 @@
     let _barGhostSnareStep = -1;
     let _barOpenHatStep = -1;
     let _barDoubleKickStep = -1;
+    let _barBreakdownFillEnabled = false; // dice roll at bar start for breakdown fills
 
     // Per-preset drum patterns — each preset has unique rhythmic DNA
     let percFeel = 'groovy';
@@ -4224,6 +4405,27 @@
         if (_hasFlam && Math.random() < 0.15 * _varAtBar) {
           _barDoubleKickStep = Math.random() < 0.5 ? 7 : 11;
         }
+
+        // Breakdown fill dice — should THIS fill bar of a breakdown get a fill?
+        // Scaled by drummer variation: the_machine never fills breakdowns,
+        // the_cat/the_professor do most of the time.
+        _barBreakdownFillEnabled = false;
+        const _arrForFillDice = FACTORY_PRESETS[currentPresetName]?._arrangement;
+        if (_arrForFillDice && _arrForFillDice.sections && _drummerAtBar) {
+          const _curSecFD = _arrForFillDice.sections[currentSectionIdx];
+          if (_curSecFD && _curSecFD.drumStyle === 'drop') {
+            const _secMaxFD = _curSecFD.maxBars ?? _arrForFillDice.maxBars ?? 16;
+            if (sectionBarCount >= _secMaxFD) {
+              // We're on the fill bar of a drop section. Roll dice scaled by variation.
+              // the_machine (variation 0) → 0% chance
+              // the_rocker (0.25) → 25%
+              // the_ghost  (0.30) → 30%
+              // the_professor (0.50) → 50%
+              // the_cat (0.60) → 60%
+              _barBreakdownFillEnabled = Math.random() < _drummerAtBar.variation;
+            }
+          }
+        }
       }
 
       const tier = percLockedTier;
@@ -4282,43 +4484,18 @@
       let hatLevel = patterns.hat[tier][percStep];
       let rimLevel = patterns.rim[tier][percStep];
 
-      // Fill bar — last bar of a section gets a drum fill to transition
-      // Detects: arrangement exists AND next bar would trigger transition.
-      // Honors per-section maxBars override.
+      // Fill bar detection — used below after drumStyle transforms so fills
+      // actually override thin/halftime styles. Stored in a var so the apply
+      // block (later) can reference it.
       const _arrFill = FACTORY_PRESETS[currentPresetName]?._arrangement;
+      let _isFillBar = false;
+      let _fillMaxBars = 16;
+      let _fillSectionDrumStyle = 'full';
       if (_arrFill && _arrFill.sections && _arrFill.sections.length > 0) {
         const _curSec = _arrFill.sections[currentSectionIdx];
-        const _maxBars = (_curSec && _curSec.maxBars) ?? _arrFill.maxBars ?? 16;
-        const isFillBar = sectionBarCount >= _maxBars;
-        if (isFillBar) {
-          // Replace the pattern with a fill — busy snare/rim on the second half, kick holds down 1 and 3
-          // This gives a "drum roll" feel leading into the next section
-          if (percStep >= 8) {
-            // Second half of the bar: add fill hits
-            const fillHits = {
-              8: { snare: 2 },
-              9: { snare: 1 }, // ghost
-              10: { snare: 2 },
-              11: { rim: 2 },
-              12: { snare: 2 },
-              13: { snare: 2 },
-              14: { rim: 3 },  // accent
-              15: { snare: 3 }, // big snare accent before the next section
-            };
-            const fh = fillHits[percStep];
-            if (fh) {
-              if (fh.snare !== undefined) snareLevel = Math.max(snareLevel, fh.snare);
-              if (fh.rim !== undefined) rimLevel = Math.max(rimLevel, fh.rim);
-              // During fill, hats drop out so the fill cuts through
-              hatLevel = 0;
-            }
-            // Crash on the final step of the fill bar — classic "boom" announcing the transition.
-            // Only on bigger sections (not the 4-bar breakdown snap, which would feel overkill).
-            if (percStep === 15 && _maxBars >= 6) {
-              fireSectionCrash(0.55);
-            }
-          }
-        }
+        _fillMaxBars = (_curSec && _curSec.maxBars) ?? _arrFill.maxBars ?? 16;
+        _fillSectionDrumStyle = (_curSec && _curSec.drumStyle) || 'full';
+        _isFillBar = sectionBarCount >= _fillMaxBars;
       }
 
       // Mid-section 4-bar accents — a softer crash every 4 bars INSIDE a section gives
@@ -4376,6 +4553,40 @@
         if (percStep === 0) { kickLevel = 0; }
         if (percStep === 2 && kickLevel === 0) kickLevel = 2;
         if (percStep === 6 && kickLevel === 0) kickLevel = 2;
+      }
+
+      // === FILL BAR OVERRIDE ===
+      // Applied AFTER drumStyle transforms so fills can override 'thin' clamps.
+      // For 'drop' sections (breakdowns), fills only fire when the per-bar dice
+      // roll enabled them (scaled by drummer variation — tight drummers skip,
+      // loose drummers add a fill before coming back in).
+      const _fillAllowed = _fillSectionDrumStyle !== 'drop' || _barBreakdownFillEnabled;
+      if (_isFillBar && _fillAllowed && percChar !== 'whisper' && percStep >= 8) {
+        const fillHits = {
+          8:  { snare: 2 },
+          9:  { snare: 1 }, // ghost
+          10: { snare: 2 },
+          11: { rim: 2 },
+          12: { snare: 2 },
+          13: { snare: 2 },
+          14: { rim: 3 },   // accent
+          15: { snare: 3 }, // BIG snare accent before the next section
+        };
+        const fh = fillHits[percStep];
+        if (fh) {
+          // Override — don't max/min, just SET them so thin/halftime don't clamp
+          if (fh.snare !== undefined) snareLevel = fh.snare;
+          if (fh.rim !== undefined) rimLevel = fh.rim;
+          // Hats drop out during fill so snare/rim cut through
+          hatLevel = 0;
+          // Re-enable kicks on beats 1 and 3 for the fill backbone
+          if (percStep === 8) kickLevel = 3;
+        }
+        // Crash on the final step — lowered threshold to include 4-bar sections
+        // (intro, etc.) so the fill actually resolves with a cymbal hit.
+        if (percStep === 15 && _fillMaxBars >= 4) {
+          fireSectionCrash(0.55);
+        }
       }
 
       // === Apply per-bar drum variations ===
@@ -4472,7 +4683,9 @@
         }
         // Sidechain duck — kick pumps the synth bus down
         // Lo-fi/lofi char gets deeper, slower pump (classic lo-fi sidechain feel)
-        if (masterGain) {
+        // Skip entirely during track transitions so the sidechain doesn't override
+        // the scheduled fade dip on masterGain.
+        if (masterGain && !_trackTransitioning) {
           const isLofi = percChar === 'lofi';
           const duckAmount = isLofi ? (0.25 + kickVel * 0.2) : (0.15 + kickVel * 0.2);
           const releaseTime = isLofi ? 0.3 : 0.15;
@@ -4718,6 +4931,7 @@
         if (musicLoop) clearInterval(musicLoop);
         stopVisualization();
         stopDrone();
+        if (_riserActive) stopRiser();
         percStep = 0;
         melodyPhrase = []; melodyPhraseIdx = 0;
         const percSec = document.getElementById('percSection');
@@ -5700,6 +5914,9 @@
             { name: 'intro',   minBars: 4, maxBars: 4, motifStyle: 'fragment',   drumStyle: 'thin',     voices: { melody: 0.3, 'gen-bass': 0.6, 'gen-arp': 0.5, 'gen-mel': 0, drone: 0.3 } },
             { name: 'main',                           motifStyle: 'straight',   drumStyle: 'full',     voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.8, 'gen-mel': 0.4, drone: 0.5 } },
             { name: 'break',   minBars: 4, maxBars: 8, motifStyle: 'fragment',   drumStyle: 'halftime', voices: { melody: 0.4, 'gen-bass': 0.7, 'gen-arp': 0.3, 'gen-mel': 0.5, drone: 0.4 } },
+            // CUT — 1-bar quick stop before the return. Bouncy pluck preset wants
+            // the shortest possible stop — just a breath, not a drop.
+            { name: 'cut',     minBars: 1, maxBars: 1, motifStyle: 'fragment',   drumStyle: 'drop',     voices: { melody: 0.1, 'gen-bass': 0.2, 'gen-arp': 0, 'gen-mel': 0, drone: 0.2 } },
             { name: 'return',                         motifStyle: 'ornamented', drumStyle: 'full',     entryAccent: 'crash', voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.9, 'gen-mel': 0.3, drone: 0.5 } },
           ],
         },
@@ -5885,6 +6102,9 @@
           sections: [
             { name: 'groove', motifStyle: 'straight',   drumStyle: 'full',     voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.4 } },
             { name: 'solo',   motifStyle: 'ornamented', drumStyle: 'thin',     voices: { melody: 1.0, 'gen-bass': 0.6, 'gen-arp': 0,   'gen-mel': 0.2 } },
+            // CUT — 3-bar asymmetric bluesy stop-time before the break. Odd bar count
+            // gives an off-kilter feel that fits the dorian bluesy character.
+            { name: 'cut',    minBars: 3, maxBars: 3,  motifStyle: 'fragment',  drumStyle: 'drop',     voices: { melody: 0.1, 'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0 } },
             { name: 'break',  motifStyle: 'fragment',   drumStyle: 'halftime', voices: { melody: 0,   'gen-bass': 1.0, 'gen-arp': 0.2, 'gen-mel': 0.5 } },
             { name: 'return', motifStyle: 'transposed', drumStyle: 'full',     voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.3 } },
           ],
@@ -5921,7 +6141,7 @@
           dly_wet:{ source:'plant_activity', depth:0.4 },      // activity adds echo
           dist_amt:{ source:'plant_activity', depth:0.3 },     // activity adds warmth
           filter_res:{ source:'plant_smooth', depth:0.3 },     // gentle resonance shift
-        }, lfo1_rate:1.5, _perc: true, _percFeel: 'synthwave', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 110, _scale: 'major', _root: 'C',
+        }, lfo1_rate:1.5, _perc: true, _percFeel: 'synthwave', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 110, _scale: 'major', _root: 'C',
         _macros: { energy: 'plant_activity' },
         _drumKit: 'linndrum', _drummer: 'the_machine',
         _drumHumanize: 0,
@@ -5936,11 +6156,18 @@
             // Verse — melody lower register, drums regular, gen-arp off to leave headroom for the chorus
             { name: 'verse',     minBars: 8, maxBars: 12, motifStyle: 'straight',   drumStyle: 'full',  percBoost: 0.9,
               voices: { melody: 0.55, 'gen-bass': 1.0, 'gen-arp': 0, 'gen-mel': 0.2 } },
+            // CUT — 2-bar stop before chorus. Everything drops except a trickle. No riser
+            // (too short to build). The sudden silence PLUS the chorus entry crash after
+            // creates a classic 80s "stop-and-hit" drop.
+            { name: 'cut',       minBars: 2, maxBars: 2,  motifStyle: 'fragment',   drumStyle: 'drop',  percBoost: 0.5,
+              voices: { melody: 0.15, 'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0 } },
             // Chorus — LIFT: +1 octave motif, louder drums, arps crash in, entry cymbal
             { name: 'chorus',    minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full',  percBoost: 1.2,
               octaveShift: 1, entryAccent: 'crash',
               voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.7, 'gen-mel': 0.5 } },
-            // Breakdown drops — short classic 80s one-bar break then snaps back
+            // Breakdown — 4-bar tension build with RISER (filter sweep + noise). The plant's
+            // activity during these 4 bars drives the riser's volume, converting plant
+            // energy into a satisfying drop back into intro.
             { name: 'breakdown', minBars: 4, maxBars: 4,  motifStyle: 'fragment',   drumStyle: 'drop',  percBoost: 0.6,
               voices: { melody: 0.2, 'gen-bass': 0.4, 'gen-arp': 0,   'gen-mel': 0 } },
           ],
@@ -6593,6 +6820,24 @@
         buildNotePool();
         updateAllKnobVisuals();
         drawPatchCables();
+
+        // Initialize preset-specific lifecycle state for the restored preset.
+        // restoreState sets currentPresetName but doesn't run loadFactoryPreset,
+        // so we need to manually generate the motif/riff and reset track timers
+        // or the track lifecycle fires immediately on first play (trackStartTime
+        // was 0 → elapsed = ~1.7 billion seconds → track "ends" on bar 1).
+        const restoredPreset = FACTORY_PRESETS[currentPresetName];
+        if (restoredPreset && restoredPreset._arrangement) {
+          currentMotif = generateMotif();
+          currentBassRiff = generateBassRiff();
+        } else {
+          currentMotif = null;
+          currentBassRiff = null;
+        }
+        trackNumber = 1;
+        trackStartTime = Date.now();
+        rootPoolIdx = 0;
+
         return true;
       } catch(e) { return false; }
     }
@@ -6870,6 +7115,9 @@
         lastDataTime = Date.now();
         try {
           const msg = JSON.parse(event.data);
+          // Heartbeat from server — connection alive, no plant data. Just
+          // reset the stale timer (already done above) and move on.
+          if (msg.hb) return;
           if (msg.ch && msg.v !== undefined) {
             handleSensorData({ id: 'sensor-plant_signal', channel: msg.ch, value: msg.v });
             return;
