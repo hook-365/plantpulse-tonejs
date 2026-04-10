@@ -1524,13 +1524,23 @@
     };
 
     // Modulatable parameters
-    const MODULATABLE = [
+    // Global targets — apply to the legacy shared chain and/or the master bus.
+    const MODULATABLE_GLOBAL = [
       'osc1_detune','osc2_detune','osc1_level','osc2_level',
       'filter_cutoff','filter_res',
       'amp_level',
       'rev_wet','dly_fb','dly_wet','chr_rate','chr_wet','dist_amt',
       'seq_prob','seq_gate','pan',
     ];
+    // Per-role targets — namespaced as `role.param`. These only take effect when the
+    // preset has a role instrument built. SYNTH_PARAMS still holds the base range/curve
+    // (looked up by the unprefixed param name), but each target has its own modRouting entry.
+    const PER_ROLE_PARAMS = ['filter_cutoff','filter_res','dist_amt'];
+    const MODULATABLE_PER_ROLE = [];
+    for (const role of ['lead','pad','bass','arp','fill']) {
+      for (const p of PER_ROLE_PARAMS) MODULATABLE_PER_ROLE.push(`${role}.${p}`);
+    }
+    const MODULATABLE = [...MODULATABLE_GLOBAL, ...MODULATABLE_PER_ROLE];
     // Mod sources: legacy aliases (plant_raw/smooth/activity) resolve to activeChannel
     // Per-channel: ch1_raw, ch2_smooth, ch3_activity, etc.
     // Derived: diff_12 (ch1-ch2 divergence), avg_all, max_activity
@@ -1646,10 +1656,25 @@
     }
 
     // --- Modulation Engine ---
+    // Resolves a target name to its numeric value.
+    // Global targets: name matches a SYNTH_PARAMS key directly.
+    // Per-role targets: name is "role.param" — base range comes from SYNTH_PARAMS[param],
+    // and the routing entry is modRouting["role.param"]. If no per-role routing exists,
+    // falls back to the global target's value so per-role params have a sensible default.
     function getModValue(name) {
-      const p = SYNTH_PARAMS[name];
+      let p = SYNTH_PARAMS[name];
+      let paramKey = name;
+      if (!p && name.indexOf('.') !== -1) {
+        paramKey = name.split('.')[1];
+        p = SYNTH_PARAMS[paramKey];
+      }
+      if (!p) return 0;
       const r = modRouting[name];
-      if (!r || r.source === 'fixed' || r.depth === 0) return p.value;
+      // If per-role target has no routing assigned, inherit the global value
+      if (!r || r.source === 'fixed' || r.depth === 0) {
+        if (paramKey !== name) return getModValue(paramKey); // inherit global
+        return p.value;
+      }
 
       let mod = Math.max(0, Math.min(1, resolveModSource(r.source)));
       const depth = r.depth;
@@ -1701,11 +1726,12 @@
       },
       tension: {
         // Resolved ↔ Tense: filter closes, resonance builds, dissonance
+        // Max values kept musical — no screaming resonance
         params: {
-          filter_cutoff: { min: 4000, max: 200, curve: 'exp' },   // filter closes
-          filter_res:    { min: 0.5, max: 12, curve: 'lin' },     // resonance screams
-          osc2_detune:   { min: 0, max: 50, curve: 'lin' },       // dissonance builds
-          dly_fb:        { min: 0.1, max: 0.65, curve: 'lin' },   // echo builds to feedback
+          filter_cutoff: { min: 3500, max: 400, curve: 'exp' },   // filter closes, stops at 400Hz
+          filter_res:    { min: 0.5, max: 5, curve: 'lin' },      // moderate resonance max
+          osc2_detune:   { min: 0, max: 25, curve: 'lin' },       // subtle dissonance
+          dly_fb:        { min: 0.1, max: 0.5, curve: 'lin' },    // controlled echo
         }
       },
     };
@@ -1790,6 +1816,160 @@
       }
     }
 
+    // --- Section-Based Arrangement (per-preset "song structure") ---
+    // Voice levels — per-tick multipliers applied to each voice source
+    // Smoothed toward voiceLevelsTarget for gentle transitions
+    let voiceLevels = {
+      drone: 1.0, melody: 1.0, 'gen-bass': 1.0,
+      'gen-arp': 1.0, 'gen-mel': 1.0, 'seq-arp': 1.0,
+    };
+    let voiceLevelsTarget = { ...voiceLevels };
+
+    // Section state
+    let currentSectionIdx = 0;
+    let sectionBarCount = 0;
+    // Rolling activity window for spike detection (bar-level stddev)
+    let barActivityWindow = []; // last 20 bar activity measurements
+    const SECTION_SPIKE_MULTIPLIER = 3.0; // bar must be 3x recent avg to trigger
+    const VOICE_ACTIVE_THRESHOLD = 0.05;  // voices below this are considered silent
+
+    // Per-tick smoothing — called from musicTick
+    function smoothVoiceLevels() {
+      for (const v in voiceLevels) {
+        const target = voiceLevelsTarget[v];
+        voiceLevels[v] += (target - voiceLevels[v]) * 0.06; // ~500ms to 90%
+        // Snap to zero when close, so the "< 0.05" gate reliably silences voices
+        if (Math.abs(voiceLevels[v] - target) < 0.005) voiceLevels[v] = target;
+      }
+    }
+
+    // Returns the current arrangement section object (or null if no arrangement)
+    function getCurrentSection() {
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const arr = preset && preset._arrangement;
+      if (!arr || !arr.sections) return null;
+      return arr.sections[currentSectionIdx] || null;
+    }
+
+    // Fires a one-shot crash cymbal on section entry — makes transitions audible.
+    // Reuses percHat but opens the filter and extends the decay.
+    let _crashSynth = null;
+    function fireSectionCrash(velocity) {
+      if (!masterGain) return;
+      try {
+        if (!_crashSynth || _crashSynth._disposed) {
+          // Build on first use — routed through the perc bus so it ducks with the mix
+          const filt = new Tone.Filter({ frequency: 6000, type: 'highpass', Q: 0.5 }).connect(percGain || masterGain);
+          const noise = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.003, decay: 1.2, sustain: 0, release: 0.8 },
+          }).connect(filt);
+          _crashSynth = noise;
+          _crashSynth._filter = filt;
+          makeMonotonic(_crashSynth);
+        }
+        _crashSynth.triggerAttackRelease('2n', undefined, velocity);
+        logNoteEvent('crash', velocity, 'perc');
+      } catch (e) {}
+    }
+
+    // Called at each bar start — rotates sections based on preset arrangement
+    function updateArrangementSection() {
+      if (!percBarStart) return;
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const arr = preset && preset._arrangement;
+      if (!arr || !arr.sections || arr.sections.length === 0) return;
+
+      sectionBarCount++;
+
+      // Compute rolling avg BEFORE pushing current so avg represents "recent history"
+      let recentAvg = 0;
+      if (barActivityWindow.length > 0) {
+        recentAvg = barActivityWindow.reduce((a, b) => a + b, 0) / barActivityWindow.length;
+      }
+
+      // Now push current activity
+      barActivityWindow.push(currentActivity);
+      if (barActivityWindow.length > 20) barActivityWindow.shift();
+
+      // Per-section minBars/maxBars override the preset default.
+      // Use case: a 4-bar breakdown drop inside an 8/16 arrangement.
+      const curSec = arr.sections[currentSectionIdx];
+      const secMin = curSec.minBars ?? arr.minBars ?? 8;
+      const secMax = curSec.maxBars ?? arr.maxBars ?? 20;
+      const canTransition = sectionBarCount >= secMin;
+      const forceTransition = sectionBarCount >= secMax;
+
+      // Spike trigger: current activity > 3x rolling average (need at least 5 bars of history)
+      let spikeTrigger = false;
+      if (canTransition && barActivityWindow.length >= 5 && recentAvg > 0.5 && currentActivity > recentAvg * SECTION_SPIKE_MULTIPLIER) {
+        spikeTrigger = true;
+      }
+
+      // Per-bar debug log — shows current state
+      console.log(
+        `%c[${currentPresetName}] %c${curSec.name} %c bar ${sectionBarCount}/${secMax} ` +
+        `%cact=${currentActivity.toFixed(1)}% (avg=${recentAvg.toFixed(1)}%) ` +
+        `%ccan=${canTransition?'Y':'N'} spike=${spikeTrigger?'Y':'N'}`,
+        'color:#d4956a;font-weight:bold', 'color:#34d399', 'color:#8896b0', 'color:#6ea8fe', 'color:#a78bfa'
+      );
+
+      if (forceTransition || spikeTrigger) {
+        const prevName = curSec.name;
+        currentSectionIdx = (currentSectionIdx + 1) % arr.sections.length;
+        sectionBarCount = 0;
+        const section = arr.sections[currentSectionIdx];
+        // Set targets — smoothing ramps voiceLevels to match
+        for (const voice in section.voices) {
+          if (voiceLevelsTarget[voice] !== undefined) {
+            voiceLevelsTarget[voice] = section.voices[voice];
+          }
+        }
+        // Entry accent — fires a crash cymbal to announce the new section audibly.
+        // Defaults: 'crash' on named sections that typically lift (chorus/return/fuller).
+        // Presets can set `entryAccent: 'crash' | 'none'` explicitly.
+        const nm = (section.name || '').toLowerCase();
+        const defaultAccent = /chorus|return|fuller|together|drop|hit/.test(nm) ? 'crash' : 'none';
+        const accent = section.entryAccent ?? defaultAccent;
+        if (accent === 'crash') fireSectionCrash(0.7);
+        // Transition log — big and obvious
+        const reason = spikeTrigger ? 'SPIKE' : 'MAX_BARS';
+        console.log(
+          `%c⇒ ${prevName} → ${section.name} %c(${reason}) ` +
+          `%cvoices: ${JSON.stringify(section.voices)} ` +
+          `%cshift=${section.octaveShift||0} boost=${section.percBoost||1} accent=${accent}`,
+          'color:#f472b6;font-weight:bold;font-size:13px', 'color:#fbbf24', 'color:#8896b0', 'color:#60a5fa'
+        );
+      }
+    }
+
+    // Reset section state when a preset loads
+    function resetArrangementSection() {
+      currentSectionIdx = 0;
+      sectionBarCount = 0;
+      barActivityWindow = [];
+      // First, reset all voices to 1.0 so old preset state doesn't bleed through
+      for (const voice in voiceLevels) {
+        voiceLevels[voice] = 1.0;
+        voiceLevelsTarget[voice] = 1.0;
+      }
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const arr = preset && preset._arrangement;
+      if (arr && arr.sections && arr.sections.length > 0) {
+        // Start on the first section — override defaults with section values
+        const section = arr.sections[0];
+        for (const voice in section.voices) {
+          if (voiceLevels[voice] !== undefined) {
+            voiceLevels[voice] = section.voices[voice];
+            voiceLevelsTarget[voice] = section.voices[voice];
+          }
+        }
+      } else {
+        // No arrangement — voices already at 1.0
+        // (nothing else to do)
+      }
+    }
+
     // --- Audio Graph (persistent, no disposal on preset change) ---
     let masterGain = null;
     let osc1Synth = null, osc2Synth = null;
@@ -1801,7 +1981,24 @@
     let stereoWidener = null, lowShelf = null, subBassSynth = null, subBassGain = null;
     let vinylNoise = null, vinylGain = null;
     // Dynamic panning
-    let synthPanner = null; // pans the main synth output
+    let synthPanner = null; // pans the main (legacy) synth output
+
+    // --- Per-instrument (role) system ---
+    // Each preset's _instruments config builds an `instruments` map of role → {synth, filter, dist, panner, gain, cfg, dispose, triggerAttackRelease}.
+    // All role chains converge at `roleSumBus`, which feeds the shared chorus/delay/reverb chain.
+    // Legacy osc1/osc2 path also terminates at roleSumBus — so presets without _instruments sound identical to before.
+    let roleSumBus = null;
+    let instruments = {}; // role → instrument object
+    // Voice name → role lookup. Voice names are what the sequencer / voiceLevels / motif code use.
+    const VOICE_TO_ROLE = {
+      melody:    'lead',
+      drone:     'pad',
+      'gen-bass':'bass',
+      'gen-arp': 'arp',
+      'seq-arp': 'arp',
+      'gen-mel': 'fill',
+    };
+    const INSTRUMENT_ROLES = ['lead', 'pad', 'bass', 'arp', 'fill'];
 
     function buildSynthGraph() {
       // Stereo enhancement chain: masterGain → lowShelf → stereoWidener → destination
@@ -1810,11 +2007,16 @@
       // Master limiter — prevents clipping on any output
       const limiter = new Tone.Limiter(-3).connect(dest);
 
-      // Compressor — tighter compression to keep cumulative level controlled
-      const compressor = new Tone.Compressor({ threshold: -24, ratio: 6, attack: 0.003, release: 0.12, knee: 6 }).connect(limiter);
+      // Master HPF — cut subsonic rumble below 30Hz (standard mastering)
+      const masterHPF = new Tone.Filter({ frequency: 30, type: 'highpass', Q: 0.707 }).connect(limiter);
+      // Master LPF — roll off harsh highs above 14kHz for warmth
+      const masterLPF = new Tone.Filter({ frequency: 14000, type: 'lowpass', Q: 0.707 }).connect(masterHPF);
 
-      // Low shelf EQ — adds warmth below 200Hz
-      lowShelf = new Tone.EQ3({ low: 3, mid: 0, high: 0, lowFrequency: 200, highFrequency: 4000 }).connect(compressor);
+      // Compressor — tighter compression to keep cumulative level controlled
+      const compressor = new Tone.Compressor({ threshold: -24, ratio: 6, attack: 0.003, release: 0.12, knee: 6 }).connect(masterLPF);
+
+      // Low shelf EQ — adds warmth below 200Hz, gentle cut above 8kHz for polish
+      lowShelf = new Tone.EQ3({ low: 3, mid: 0, high: -2, lowFrequency: 200, highFrequency: 8000 }).connect(compressor);
 
       // Stereo widener — chorus with very short delay creates spatial width
       stereoWidener = new Tone.Chorus({
@@ -1823,13 +2025,16 @@
 
       masterGain = new Tone.Gain(0.4).connect(stereoWidener);
 
-      // Sub-bass synth — follows bass notes an octave below, pure sine
-      subBassGain = new Tone.Gain(0.25).connect(limiter); // sub-bass through limiter
+      // Sub-bass synth — follows bass notes an octave below, pure sine.
+      // Dropped to 0.08 — the new kickSub layer now provides sub-range energy,
+      // so we don't need a second sub-bass source competing with it.
+      subBassGain = new Tone.Gain(0.08).connect(limiter);
       subBassSynth = new Tone.MonoSynth({
         oscillator: { type: 'sine' },
         envelope: { attack: 0.05, decay: 0.5, sustain: 0.7, release: 1.0 },
         filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 1, release: 0.5, baseFrequency: 30, octaves: 1.5 },
       }).connect(subBassGain);
+      makeMonotonic(subBassSynth);
 
       // Vinyl crackle — real sample, looped
       // Routes DIRECTLY to limiter, bypassing compressor/masterGain
@@ -1859,7 +2064,10 @@
       reverbNode.connect(panR);
       delayNode = new Tone.FeedbackDelay({ delayTime: 0.375, feedback: 0.25, wet: 0.2 }).connect(reverbNode);
       chorusNode = new Tone.Chorus({ frequency: 1.5, depth: 0.7, wet: 0 }).connect(delayNode).start();
-      distNode = new Tone.Distortion({ distortion: 0, wet: 0 }).connect(chorusNode);
+      // roleSumBus — single convergence point for both legacy and per-role instrument chains.
+      // Everything merges here before entering the shared spatial FX chain.
+      roleSumBus = new Tone.Gain(1).connect(chorusNode);
+      distNode = new Tone.Distortion({ distortion: 0, wet: 0 }).connect(roleSumBus);
       synthPanner = new Tone.Panner(0).connect(distNode);
       filterNode = new Tone.Filter({ frequency: 3000, type: 'lowpass', Q: 1 }).connect(synthPanner);
 
@@ -1883,6 +2091,116 @@
       }).connect(osc2Gain);
 
       buildNotePool();
+    }
+
+    // --- Instrument factory ---
+    // Builds one role chain: synth → filter → dist → panner → gain → roleSumBus.
+    // Supports PolySynth (default), MonoSynth, and Sampler (for future real-sample presets).
+    function createInstrument(cfg) {
+      if (!roleSumBus) {
+        console.warn('[instruments] createInstrument called before buildSynthGraph — skipping');
+        return null;
+      }
+      cfg = cfg || {};
+      let synth;
+      const envelope = cfg.envelope || { attack: 0.01, decay: 0.3, sustain: 0.7, release: 0.5 };
+      const defaultFiltEnv = {
+        attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.5,
+        baseFrequency: cfg.cutoff || 200, octaves: 2,
+      };
+      if (cfg.type === 'sampler' && cfg.urls) {
+        synth = new Tone.Sampler({
+          urls: cfg.urls,
+          baseUrl: cfg.baseUrl || '',
+          release: cfg.release || 1,
+        });
+      } else if (cfg.type === 'mono') {
+        // True mono — only use for monophonic voices (e.g. lead solos). NOT safe for chords.
+        synth = new Tone.MonoSynth({
+          oscillator: { type: cfg.wave || 'sawtooth' },
+          envelope,
+          filterEnvelope: cfg.filterEnv || defaultFiltEnv,
+        });
+      } else if (cfg.type === 'poly-mono') {
+        // Polyphonic MonoSynth — preserves per-note filter envelope punch while handling chords.
+        // This is what you want for chord-playing bass/lead voices that need filter env pop.
+        synth = new Tone.PolySynth(Tone.MonoSynth, {
+          maxPolyphony: cfg.maxPolyphony || 6,
+          options: {
+            oscillator: { type: cfg.wave || 'sawtooth' },
+            envelope,
+            filterEnvelope: cfg.filterEnv || defaultFiltEnv,
+          },
+        });
+      } else {
+        synth = new Tone.PolySynth(Tone.Synth, {
+          maxPolyphony: cfg.maxPolyphony || 6,
+          options: {
+            oscillator: { type: cfg.wave || 'sawtooth', spread: cfg.spread || 0 },
+            envelope,
+          },
+        });
+      }
+      const filter = new Tone.Filter({
+        frequency: cfg.cutoff || 3000,
+        Q: cfg.res || 1,
+        type: cfg.filterType || 'lowpass',
+      });
+      const dist = new Tone.Distortion({
+        distortion: cfg.distAmt || 0,
+        wet: (cfg.distAmt || 0) > 0 ? (cfg.distWet ?? 1) : 0,
+      });
+      const panner = new Tone.Panner(cfg.pan || 0);
+      const gain = new Tone.Gain(cfg.level ?? 0.7);
+      synth.chain(filter, dist, panner, gain, roleSumBus);
+      // Monotonic time tracker — Tone.js requires strictly increasing start times
+      // per voice. When triggerNote fires with time=undefined it resolves to Tone.now(),
+      // and back-to-back calls within the same audio clock tick collide. We bump the
+      // next call by 1ms to keep the schedule monotonic.
+      let _lastTriggerTime = 0;
+      return {
+        cfg,
+        synth, filter, dist, panner, gain,
+        dispose() {
+          try { synth.releaseAll && synth.releaseAll(); } catch (e) {}
+          try { synth.disconnect(); } catch (e) {}
+          try { synth.dispose(); } catch (e) {}
+          try { filter.dispose(); } catch (e) {}
+          try { dist.dispose(); } catch (e) {}
+          try { panner.dispose(); } catch (e) {}
+          try { gain.dispose(); } catch (e) {}
+        },
+        triggerAttackRelease(note, duration, time, velocity) {
+          try {
+            let t = time;
+            if (t === undefined) {
+              t = Tone.now();
+              if (t <= _lastTriggerTime) t = _lastTriggerTime + 0.001;
+            }
+            _lastTriggerTime = t;
+            synth.triggerAttackRelease(note, duration, t, velocity);
+          } catch (e) { console.warn('[instruments] trigger failed', e); }
+        },
+      };
+    }
+
+    // Build (or rebuild) all role instruments from a preset's _instruments config.
+    // Disposes previous role instruments first. Presets without _instruments end up with instruments = {}.
+    function buildInstrumentsFromPreset(presetCfg) {
+      // Dispose existing
+      for (const role in instruments) {
+        if (instruments[role]) instruments[role].dispose();
+      }
+      instruments = {};
+      const iCfg = presetCfg && presetCfg._instruments;
+      if (!iCfg) return; // legacy path — triggerNote will fall back to osc1/osc2
+      for (const role of INSTRUMENT_ROLES) {
+        if (iCfg[role]) {
+          const inst = createInstrument(iCfg[role]);
+          if (inst) instruments[role] = inst;
+        }
+      }
+      console.log('[instruments] built roles:', Object.keys(instruments).join(', '));
     }
 
     function applySynthParams() {
@@ -1923,6 +2241,35 @@
         // Pan
         if (synthPanner) synthPanner.pan.rampTo(Math.max(-1, Math.min(1, getModValue('pan'))), RG);
       } catch(e) {}
+
+      // Per-role parameter writes — each role instrument has its own filter/dist.
+      // Only overwrite when a per-role routing is ACTIVE. Otherwise the instrument
+      // keeps the cutoff/res/dist values from its cfg (createInstrument), which is
+      // what makes each role sound distinct. Patching `lead.filter_cutoff ← xy_x`
+      // then activates live modulation of just that role.
+      const routingActive = (name) => {
+        const r = modRouting[name];
+        return r && r.source !== 'fixed' && r.depth > 0;
+      };
+      for (const role in instruments) {
+        const inst = instruments[role];
+        if (!inst) continue;
+        try {
+          if (inst.filter && routingActive(`${role}.filter_cutoff`)) {
+            inst.filter.frequency.rampTo(
+              Math.max(20, Math.min(20000, getModValue(`${role}.filter_cutoff`))), RF);
+          }
+          if (inst.filter && routingActive(`${role}.filter_res`)) {
+            inst.filter.Q.rampTo(
+              Math.max(0.1, Math.min(20, getModValue(`${role}.filter_res`))), RF);
+          }
+          if (inst.dist && routingActive(`${role}.dist_amt`)) {
+            const dAmt = clamp01(getModValue(`${role}.dist_amt`));
+            inst.dist.distortion = dAmt;
+            inst.dist.wet.rampTo(Math.min(1, dAmt * 4), RG);
+          }
+        } catch (e) {}
+      }
 
       // Update knob visuals if modulated
       updateModulatedKnobs();
@@ -2051,24 +2398,35 @@
       lastNoteDisplayTime = now;
       const mode = SYNTH_PARAMS.midi_mode.value;
       if (mode === 'audio' || mode === 'both') {
-        // Per-source pan offset on top of the modulated pan knob value
-        if (synthPanner) {
-          const basePan = getModValue('pan');
-          let offset = 0;
-          if (_noteLogSrc === 'melody') offset = Math.sin(Date.now() / 2000) * 0.3;
-          else if (_noteLogSrc === 'gen-arp' || _noteLogSrc === 'seq-arp') offset = -Math.sin(Date.now() / 2000) * 0.2;
-          else if (_noteLogSrc === 'gen-mel') offset = Math.sin(Date.now() / 3000) * 0.25;
-          else if (_noteLogSrc === 'gen-bass' || _noteLogSrc === 'bass') offset = -basePan * 0.8; // pull bass toward center
-          synthPanner.pan.rampTo(Math.max(-1, Math.min(1, basePan + offset)), 0.05);
-        }
         // Humanize note velocity slightly — ±8% random variation for organic feel
         const humanVel = velocity * (0.92 + Math.random() * 0.16);
-        const osc2Note = Tone.Frequency(note).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
-        osc1Synth.triggerAttackRelease(note, duration, undefined, humanVel * 0.7);
-        if (SYNTH_PARAMS.osc2_level.value > 0) {
-          osc2Synth.triggerAttackRelease(osc2Note, duration, undefined, humanVel * 0.4);
+
+        // Per-source pan offset on top of the modulated pan knob value
+        const basePan = getModValue('pan');
+        let panOffset = 0;
+        if (_noteLogSrc === 'melody') panOffset = Math.sin(Date.now() / 2000) * 0.3;
+        else if (_noteLogSrc === 'gen-arp' || _noteLogSrc === 'seq-arp') panOffset = -Math.sin(Date.now() / 2000) * 0.2;
+        else if (_noteLogSrc === 'gen-mel') panOffset = Math.sin(Date.now() / 3000) * 0.25;
+        else if (_noteLogSrc === 'gen-bass' || _noteLogSrc === 'bass') panOffset = -basePan * 0.8; // pull bass toward center
+        const panVal = Math.max(-1, Math.min(1, basePan + panOffset));
+
+        // Dispatch by role if a role instrument exists for this voice
+        const role = VOICE_TO_ROLE[_noteLogSrc];
+        const roleInst = role ? instruments[role] : null;
+        if (roleInst) {
+          // Role path: each instrument has its own panner on its insert chain
+          if (roleInst.panner) roleInst.panner.pan.rampTo(panVal, 0.05);
+          roleInst.triggerAttackRelease(note, duration, undefined, humanVel);
+        } else {
+          // Legacy path: shared osc1/osc2 through synthPanner
+          if (synthPanner) synthPanner.pan.rampTo(panVal, 0.05);
+          const osc2Note = Tone.Frequency(note).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
+          osc1Synth.triggerAttackRelease(note, duration, undefined, humanVel * 0.7);
+          if (SYNTH_PARAMS.osc2_level.value > 0) {
+            osc2Synth.triggerAttackRelease(osc2Note, duration, undefined, humanVel * 0.4);
+          }
+          triggerFilterEnvelope();
         }
-        triggerFilterEnvelope();
       }
       if ((mode === 'midi' || mode === 'both') && midiOutput) {
         midiNoteOn(note, velocity);
@@ -2153,7 +2511,10 @@
 
       const chordStr = newChord.join(',');
       if (chordStr !== droneNotes.join(',')) {
-        // Release old notes, play new ones
+        // Route drone through the pad role instrument if present, else legacy osc1/osc2.
+        const padInst = instruments.pad;
+        // Release old notes
+        if (padInst && padInst.synth && padInst.synth.releaseAll) padInst.synth.releaseAll();
         osc1Synth.releaseAll();
         osc2Synth.releaseAll();
         // If sustain is very low (piano-like), use triggerAttackRelease so notes decay naturally
@@ -2168,7 +2529,14 @@
           const microDelay = chordIdx * (Math.random() * 0.008) * 1000;
           if (mode === 'audio' || mode === 'both') {
             const fire = () => {
-              if (useNaturalDecay) {
+              if (padInst) {
+                // Pad role path — no osc2 layering (the sample/synth is the whole sound)
+                if (useNaturalDecay) {
+                  padInst.triggerAttackRelease(n, droneDuration, undefined, 0.35 * humanV);
+                } else {
+                  try { padInst.synth.triggerAttack(n, undefined, 0.3 * humanV); } catch (_) {}
+                }
+              } else if (useNaturalDecay) {
                 osc1Synth.triggerAttackRelease(n, droneDuration, undefined, 0.35 * humanV);
                 if (SYNTH_PARAMS.osc2_level.value > 0) {
                   const n2 = Tone.Frequency(n).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
@@ -2188,6 +2556,7 @@
           if ((mode === 'midi' || mode === 'both') && midiOutput) midiNoteOn(n, 0.3);
         });
         droneNotes = newChord;
+        if (padInst && padInst.panner) padInst.panner.pan.rampTo(0, 0.1);
         if (synthPanner) synthPanner.pan.rampTo(0, 0.1); // drone stays center
         newChord.forEach(n => logNoteEvent(n, 0.3, 'drone'));
         // Sub-bass drone: root note an octave below
@@ -2209,6 +2578,9 @@
     }
 
     function stopDrone() {
+      if (instruments.pad && instruments.pad.synth && instruments.pad.synth.releaseAll) {
+        try { instruments.pad.synth.releaseAll(); } catch (_) {}
+      }
       if (osc1Synth) osc1Synth.releaseAll();
       if (osc2Synth) osc2Synth.releaseAll();
       if (subBassSynth) subBassSynth.triggerRelease();
@@ -2236,7 +2608,9 @@
       const beatMs = getSeqBeatMs();
 
       if (mode === 'generative') {
-        const velocity = 0.1 + Math.min(currentActivity / 50, 0.35);
+        // Floor velocity at 0.25 so quiet plants still produce audible notes
+        // Active plant pushes it higher for dynamic contrast
+        const velocity = 0.25 + Math.min(currentActivity / 50, 0.3);
         const step = percStep;
 
         // Per-preset generative layouts — different rhythmic skeletons
@@ -2246,14 +2620,14 @@
           bells:      { bass:[0, 8],  arp:[2,4,10,14],      arpProb:0.4,  melProb:0.25 },
           // Organic: swung, bass walks more, melody fills heavily
           organic:    { bass:[0, 5],  arp:[3,7,11,15],      arpProb:0.25, melProb:0.45 },
-          // Synth Wave: driving, steady bass, arps on off-beats
-          synthwave:  { bass:[0, 4, 8, 12], arp:[2,6,10,14], arpProb:0.45, melProb:0.2 },
+          // Synth Wave: perc bass carries low, gen-bass minimal (just beat 0 as chord anchor)
+          synthwave:  { bass:[0], arp:[2,6,10,14], arpProb:0.45, melProb:0.2 },
           // Piano: sparse bass, lots of melody space, lyrical
           piano:      { bass:[0, 8],  arp:[4, 12],          arpProb:0.2,  melProb:0.5 },
           // Lo-Fi: laid-back, bass on 1 and 9, arp sparse, melody chill
           lofi:       { bass:[0, 8],  arp:[3,5,11,13],      arpProb:0.3,  melProb:0.35 },
-          // Circuit: chiptune — busy bass, lots of arps, melody bursts
-          circuit:    { bass:[0, 4, 8, 12], arp:[1,3,5,7,9,11,13,15], arpProb:0.5, melProb:0.3 },
+          // Circuit: chiptune — perc bass + sparse gen-bass anchors
+          circuit:    { bass:[0, 8], arp:[1,3,5,7,9,11,13,15], arpProb:0.5, melProb:0.3 },
         };
         const layout = GEN_LAYOUTS[currentPresetName] || GEN_LAYOUTS.default;
         const allAssigned = new Set([...layout.bass, ...layout.arp]);
@@ -2266,33 +2640,69 @@
         // At low activity, probability of playing any non-bass step drops
         const playChance = 0.4 + actNorm * 0.6; // 40% at zero activity, 100% at 40%+
 
-        // Bass — always plays (foundation) but can shift timing with activity
+        // Bass — plant-driven density: quiet = just root, active = full chord
+        // Piano-like presets spread the chord over time (Alberti bass) instead of stacking
         const bassShift = (currentActivity > 20 && Math.random() < 0.15) ? (Math.random() < 0.5 ? -1 : 1) : 0;
         const shiftedBass = layout.bass.map(s => ((s + bassShift) + 16) % 16);
-        if (percOnStep && shiftedBass.includes(step)) {
-          // Lock bass root to lowest octave of note pool
+        const genBarIdx = Math.floor(Date.now() / (getSeqBeatMs() * 4)) % 4; // 4-bar cycle
+        // Activity determines chord density on this bar
+        const chordDensity = actNorm; // 0=root only, 0.5=root+5th, 1=full triad
+        // Every 4 bars, skip the bass entirely for breathing space (1/4 chance)
+        const restBar = (genBarIdx === 3 && Math.random() < 0.4);
+
+        const _genBassLevel = voiceLevels['gen-bass'];
+        if (percOnStep && shiftedBass.includes(step) && !restBar && _genBassLevel > VOICE_ACTIVE_THRESHOLD) {
           const _notesPerOct = Math.max(1, Math.floor(currentNotes.length / 4));
           let walkIdx = 0;
           if (Math.random() > 0.3) {
-            const offsets = [0, 1, 2, 3]; // scale degrees within first octave
+            const offsets = [0, 1, 2, 3];
             walkIdx = offsets[Math.floor(Math.random() * offsets.length)];
           }
           const noteIdx = Math.min(_notesPerOct - 1, walkIdx);
-          // Transpose down an octave so gen-bass plays in octave 2
           let bassNoteLow = currentNotes[noteIdx];
           try { bassNoteLow = Tone.Frequency(bassNoteLow).transpose(-12).toNote(); } catch(_) {}
           _noteLogSrc = 'gen-bass';
-          // Trigger the root in low octave, then optionally chord tones in proper octave
-          triggerNote(bassNoteLow, gate * 2, velocity * 0.35);
+          // Always play the root — foundation of the bar
+          triggerNote(bassNoteLow, gate * 2, velocity * 0.35 * _genBassLevel);
+
           const _melPlaying = melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length;
+          const isPianoLike = SYNTH_PARAMS.amp_s.value < 0.1; // piano has near-zero sustain
+          const thirdIdx = Math.min(currentNotes.length - 1, noteIdx + 2);
+          const fifthIdx = Math.min(currentNotes.length - 1, noteIdx + 4);
+
           if (SYNTH_PARAMS.seq_voice.value === 'poly' && !_melPlaying) {
-            // Third and fifth at normal octave (not transposed down) — spread chord
-            const thirdIdx = Math.min(currentNotes.length - 1, noteIdx + 2);
-            const fifthIdx = Math.min(currentNotes.length - 1, noteIdx + 4);
-            triggerNote(currentNotes[thirdIdx], gate * 2, velocity * 0.25);
-            triggerNote(currentNotes[fifthIdx], gate * 2, velocity * 0.2);
+            if (isPianoLike) {
+              // Broken chord (Alberti bass) — spread notes across beats
+              // 5th plays 2 steps later, 3rd plays 4 steps later — feels like left hand movement
+              const stepMs = getSeqBeatMs() / 4;
+              if (chordDensity > 0.25) {
+                setTimeout(() => {
+                  triggerNote(currentNotes[fifthIdx], gate * 2, velocity * 0.22 * _genBassLevel);
+                }, stepMs * 2);
+              }
+              if (chordDensity > 0.5) {
+                setTimeout(() => {
+                  triggerNote(currentNotes[thirdIdx], gate * 2, velocity * 0.25 * _genBassLevel);
+                }, stepMs * 4);
+              }
+              if (chordDensity > 0.75) {
+                // 7th — occasional color at high density
+                const seventhIdx = Math.min(currentNotes.length - 1, noteIdx + 6);
+                setTimeout(() => {
+                  triggerNote(currentNotes[seventhIdx], gate * 2, velocity * 0.2 * _genBassLevel);
+                }, stepMs * 6);
+              }
+            } else {
+              // Non-piano presets — stacked chord, density scales with activity
+              if (chordDensity > 0.3) {
+                triggerNote(currentNotes[fifthIdx], gate * 2, velocity * 0.2 * _genBassLevel);
+              }
+              if (chordDensity > 0.6) {
+                triggerNote(currentNotes[thirdIdx], gate * 2, velocity * 0.25 * _genBassLevel);
+              }
+            }
           }
-          if (subBassSynth) { try { subBassSynth.triggerAttackRelease(Tone.Frequency(bassNoteLow).transpose(-12).toNote(), gate * 2, undefined, velocity * 0.3); } catch(_){} }
+          if (subBassSynth) { try { subBassSynth.triggerAttackRelease(Tone.Frequency(bassNoteLow).transpose(-12).toNote(), gate * 2, undefined, velocity * 0.3 * _genBassLevel); } catch(_){} }
         }
 
         // Clamp gen melody/arp to 2nd octave of pool — middle register only
@@ -2301,29 +2711,31 @@
         const _genRangeEnd = Math.floor(_genNotesPerOct * 2) - 1;
         const _genRangeSize = Math.max(1, _genRangeEnd - _genRangeStart);
 
-        // Arp — gated by plant activity, quieter when melody phrase is playing
+        // Arp — gated by plant activity AND voice level
+        const _genArpLevel = voiceLevels['gen-arp'];
         const _arpMelGate = (melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length) ? 0.5 : 1;
-        if (percOnStep && layout.arp.includes(step) && Math.random() < playChance * _arpMelGate) {
+        if (_genArpLevel > VOICE_ACTIVE_THRESHOLD && percOnStep && layout.arp.includes(step) && Math.random() < playChance * _arpMelGate) {
           if (Math.random() < (layout.arpProb + actNorm * 0.15) * _arpMelGate) {
             const sigN = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
             const baseIdx = _genRangeStart + Math.floor(sigN * _genRangeSize * 0.5);
             const intervals = [0, 1, 2, 3, 4, 5];
             const toneIdx = intervals[arpIndex % intervals.length];
             const noteIdx = Math.min(_genRangeEnd, baseIdx + toneIdx);
-            _noteLogSrc = 'gen-arp'; triggerNote(currentNotes[noteIdx], gate * 0.4, velocity * 0.3);
+            _noteLogSrc = 'gen-arp'; triggerNote(currentNotes[noteIdx], gate * 0.4, velocity * 0.3 * _genArpLevel);
             arpIndex++;
           }
         }
 
-        // Generative melody — backs off when dedicated melody system is playing a phrase
+        // Generative melody — backs off when dedicated melody system is playing, also gated by voice level
+        const _genMelLevel = voiceLevels['gen-mel'];
         const melodyPlaying = melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length;
-        if (!melodyPlaying && percOnStep && melSteps.includes(step) && Math.random() < playChance) {
+        if (_genMelLevel > VOICE_ACTIVE_THRESHOLD && !melodyPlaying && percOnStep && melSteps.includes(step) && Math.random() < playChance) {
           if (Math.random() < layout.melProb + actNorm * 0.1) {
             const jitter = Math.floor((Math.random() - 0.5) * 2);
             const sigN = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
             const idx = _genRangeStart + Math.floor(sigN * _genRangeSize);
             const noteIdx = Math.max(_genRangeStart, Math.min(_genRangeEnd, idx + jitter));
-            _noteLogSrc = 'gen-mel'; triggerNote(currentNotes[noteIdx], gate * 0.5, velocity * 0.4);
+            _noteLogSrc = 'gen-mel'; triggerNote(currentNotes[noteIdx], gate * 0.5, velocity * 0.4 * _genMelLevel);
           }
         }
         return;
@@ -2331,6 +2743,8 @@
 
       // Arp mode — plays on even steps, skips some based on probability
       if (mode === 'arp') {
+        const _seqArpLevel = voiceLevels['seq-arp'];
+        if (_seqArpLevel <= VOICE_ACTIVE_THRESHOLD) return;
         const actNorm = Math.min(1, currentActivity / 40);
         const stepOk = percStep % 2 === 0 || (actNorm > 0.5 && percStep % 2 === 1 && Math.random() < actNorm);
         if (!percOnStep || !stepOk) return;
@@ -2352,7 +2766,7 @@
         // Occasionally jump an octave for variation
         const octJump = Math.random() < 0.1 ? (currentNotes.length / 4) : 0;
         const noteIdx = Math.min(currentNotes.length - 1, Math.max(0, baseIdx + intervals[toneIdx] + Math.floor(octJump)));
-        const velocity = 0.1 + actNorm * 0.35;
+        const velocity = (0.1 + actNorm * 0.35) * _seqArpLevel;
         _noteLogSrc = 'seq-arp'; triggerNote(currentNotes[noteIdx], gate, velocity);
         arpIndex++;
         return;
@@ -2365,8 +2779,16 @@
         lastSpikeValue = currentRawValue;
         if (delta > range * 0.08 && now - lastSeqTime > 200) {
           lastSeqTime = now;
-          const note = mapSignalToNote(currentRawValue, 0);
-          const velocity = Math.min(0.3 + (delta / range) * 2, 0.9);
+          // Clamp spike notes to 2nd octave of pool (middle register)
+          const _spikeNotesPerOct = Math.max(1, Math.floor(currentNotes.length / 4));
+          const _spikeStart = _spikeNotesPerOct;
+          const _spikeEnd = Math.floor(_spikeNotesPerOct * 2) - 1;
+          const _spikeRange = Math.max(1, _spikeEnd - _spikeStart);
+          const sigN = Math.max(0, Math.min(1, (currentRawValue - signalMin) / range));
+          const noteIdx = _spikeStart + Math.floor(sigN * _spikeRange);
+          const note = currentNotes[Math.min(_spikeEnd, noteIdx)];
+          // Cap spike velocity to avoid harshness on rapid activity
+          const velocity = Math.min(0.25 + (delta / range) * 1.2, 0.55);
           _noteLogSrc = 'seq-spike'; triggerNote(note, gate, velocity);
         }
       }
@@ -2430,22 +2852,299 @@
       return MELODY_STYLES[currentPresetName] || MELODY_STYLES.default;
     }
 
+    // --- Motif System ---
+    // A motif is a short sequence of scale-degree offsets (interval shape)
+    // generated once at preset load from plant state.
+    // Phrase generation uses variations of this motif in different sections.
+    let currentMotif = null; // { intervals: [0, 2, -1, ...], rhythm: [1, 1, 2, 1, ...] }
+
+    function generateMotif() {
+      // Sample plant state to seed the motif
+      const sigNorm = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1)));
+      const actLevel = Math.min(1, currentActivity / 40);
+      const rawPos = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
+
+      // Motif length: 5-7 notes. Minimum 5 so riffs have real melodic variety.
+      // A 3-note motif with 2 unique intervals made the bass riff feel repetitive.
+      const motifLen = 5 + Math.floor(actLevel * 2);
+
+      // Intervallic pool — stepwise motion for quiet plants, bigger leaps for active
+      // Each value is scale degrees (0 = root, 1 = 2nd, 2 = 3rd, etc.)
+      const intervals = [0]; // always start on root
+      for (let i = 1; i < motifLen; i++) {
+        // Use plant state to pick next interval deterministically-ish
+        const roll = (sigNorm + i * 0.37 + rawPos * 0.23) % 1;
+        let step;
+        if (actLevel < 0.3) {
+          // Stepwise: -1, +1, +2, -2
+          const opts = [1, -1, 2, -2];
+          step = opts[Math.floor(roll * opts.length)];
+        } else if (actLevel < 0.6) {
+          // Mixed: steps and small skips
+          const opts = [1, -1, 2, -2, 3, -3];
+          step = opts[Math.floor(roll * opts.length)];
+        } else {
+          // Leap-heavy: bigger jumps for active plants
+          const opts = [2, -2, 3, -3, 4, -4, 1, -1];
+          step = opts[Math.floor(roll * opts.length)];
+        }
+        // Keep the motif within ±5 scale degrees from root (avoid wandering)
+        const newInterval = Math.max(-5, Math.min(5, intervals[i - 1] + step));
+        intervals.push(newInterval);
+      }
+
+      // Rhythm — each note is 1, 2, or 3 steps long (16th, 8th, dotted 8th)
+      // Rhythm based on activity: quiet = longer notes, active = faster
+      const rhythm = [];
+      for (let i = 0; i < motifLen; i++) {
+        const r = (rawPos + i * 0.41) % 1;
+        if (actLevel < 0.3) {
+          rhythm.push(r < 0.5 ? 2 : 3); // longer notes
+        } else if (actLevel < 0.6) {
+          rhythm.push(r < 0.4 ? 1 : (r < 0.8 ? 2 : 3));
+        } else {
+          rhythm.push(r < 0.6 ? 1 : 2); // faster notes
+        }
+      }
+
+      return { intervals, rhythm };
+    }
+
+    // --- Bass Riff ---
+    // A bass RIFF is a fixed (step → interval) map that plays identically every bar.
+    // It's the hook — think Sweet Dreams, Billie Jean, Another One Bites the Dust.
+    // The riff is generated ONCE at preset load from the motif's intervals and a
+    // rhythmic template. It stays constant through a section; variations only happen
+    // when the section changes (or on the rare ornament bar).
+    let currentBassRiff = null; // { step: interval } or null
+
+    // Rhythm templates — each is a set of 16th-step positions within a bar.
+    // Picked based on preset tempo and feel so different presets get different grooves.
+    const BASS_RIFF_TEMPLATES = [
+      // 0: Classic 80s syncopated — "Sweet Dreams"-ish pulse
+      { name: 'sweet',    steps: [0, 3, 6, 8, 11, 14] },
+      // 1: Straight eighth-note pulse — driving, hypnotic
+      { name: 'pulse',    steps: [0, 2, 4, 6, 8, 10, 12, 14] },
+      // 2: "Billie Jean" style — quarters with a pickup
+      { name: 'billie',   steps: [0, 4, 7, 8, 12, 15] },
+      // 3: "Another One Bites the Dust" — syncopated skip
+      { name: 'skip',     steps: [0, 3, 8, 10, 13] },
+      // 4: Sparse half-time pulse — lofi feel
+      { name: 'sparse',   steps: [0, 6, 8, 14] },
+      // 5: Driving four-on-floor bass
+      { name: 'driving',  steps: [0, 4, 8, 12] },
+    ];
+
+    function generateBassRiff() {
+      if (!currentMotif || !currentMotif.intervals || currentMotif.intervals.length === 0) return null;
+      // Pick a template — biased by percFeel so synthwave/organic/lofi feel different
+      let templateIdx = 0;
+      if (percFeel === 'synthwave' || percFeel === 'circuit') templateIdx = 0; // sweet
+      else if (percFeel === 'pluck')                          templateIdx = 1; // pulse
+      else if (percFeel === 'organic')                        templateIdx = 2; // billie
+      else if (percFeel === 'lofi')                           templateIdx = 4; // sparse
+      else if (percFeel === 'groovy')                         templateIdx = 3; // skip
+      else                                                    templateIdx = Math.floor(Math.random() * BASS_RIFF_TEMPLATES.length);
+      const tmpl = BASS_RIFF_TEMPLATES[templateIdx];
+      // Store steps + pitches SEPARATELY so we can rotate pitches per-bar
+      // without rebuilding the structure each time.
+      const pitches = [];
+      for (let i = 0; i < tmpl.steps.length; i++) {
+        pitches.push(currentMotif.intervals[i % currentMotif.intervals.length]);
+      }
+      const riffObj = {
+        name: tmpl.name,
+        steps: [...tmpl.steps],
+        pitches,
+      };
+      console.log(
+        `%c[riff] %cgenerated ${tmpl.name} ` +
+        `%csteps=[${riffObj.steps.join(',')}] ` +
+        `%cpitches=[${riffObj.pitches.join(',')}]`,
+        'color:#fbbf24;font-weight:bold', 'color:#34d399', 'color:#8896b0', 'color:#60a5fa'
+      );
+      return riffObj;
+    }
+
+    // Apply a section-level variation AND per-bar rotation to the riff.
+    // Returns a { step: interval } map for the current bar.
+    //
+    // The KEY insight: within a section, rotating the pitch sequence per bar makes
+    // each bar emphasize a different part of the motif, giving the riff "evolution"
+    // without breaking its identity. Bar 0 might start on root; bar 1 starts on the
+    // 3rd; bar 2 on the 5th; bar 3 wraps back. The rhythm is identical — only the
+    // pitches cycle.
+    function varyRiff(riff, motifStyle, barIdx) {
+      if (!riff || !riff.steps || !riff.pitches) return null;
+
+      // Per-bar pitch rotation — the source of melodic variety within a section.
+      // Rotates through the pitch sequence so each bar hits a different starting pitch.
+      let pitches = [...riff.pitches];
+      let steps = [...riff.steps];
+      const rotation = barIdx % pitches.length;
+      pitches = [...pitches.slice(rotation), ...pitches.slice(0, rotation)];
+
+      // Apply section variation on top of rotation
+      if (motifStyle === 'inverted') {
+        pitches = pitches.map(i => -i);
+      } else if (motifStyle === 'transposed') {
+        pitches = pitches.map(i => i + 2);
+      } else if (motifStyle === 'fragment') {
+        const keep = Math.ceil(steps.length / 2);
+        steps = steps.slice(0, keep);
+        pitches = pitches.slice(0, keep);
+      } else if (motifStyle === 'ornamented') {
+        // Insert passing tones between pairs of steps (in-place expansion)
+        const outSteps = [];
+        const outPitches = [];
+        for (let i = 0; i < steps.length; i++) {
+          outSteps.push(steps[i]);
+          outPitches.push(pitches[i]);
+          if (i < steps.length - 1) {
+            const gap = steps[i + 1] - steps[i];
+            if (gap >= 2) {
+              outSteps.push(steps[i] + 1);
+              outPitches.push(Math.round((pitches[i] + pitches[i + 1]) / 2));
+            }
+          }
+        }
+        steps = outSteps;
+        pitches = outPitches;
+      } else if (motifStyle === 'retrograde') {
+        pitches = pitches.slice().reverse();
+      }
+
+      // Build the { step: interval } map that percTick consumes
+      const map = {};
+      for (let i = 0; i < steps.length; i++) {
+        map[steps[i]] = pitches[i];
+      }
+      return map;
+    }
+
+    // Map a motif to bass step positions across a 2-bar window.
+    // Rhythm values in the motif are duration units (1=short, 2=medium, 3=long).
+    // We stretch the motif over 32 steps (2 bars) so it feels like a bass riff, not a melody run.
+    // Returns an array of { step (0..31), interval } entries.
+    function motifToBassEvents(motif) {
+      if (!motif || !motif.intervals || motif.intervals.length === 0) return [];
+      const totalUnits = motif.rhythm.reduce((a, b) => a + b, 0) || motif.intervals.length;
+      const stepsPerUnit = 32 / totalUnits;
+      const events = [];
+      let pos = 0;
+      for (let i = 0; i < motif.intervals.length; i++) {
+        const step = Math.round(pos * stepsPerUnit) % 32;
+        events.push({ step, interval: motif.intervals[i] });
+        pos += motif.rhythm[i] || 1;
+      }
+      return events;
+    }
+
+    // Variation generators — transform the base motif for different sections
+    const MOTIF_VARIATIONS = {
+      straight: (m) => ({ intervals: [...m.intervals], rhythm: [...m.rhythm] }),
+      transposed: (m, shift = 2) => ({
+        intervals: m.intervals.map(i => i + shift),
+        rhythm: [...m.rhythm],
+      }),
+      inverted: (m) => ({
+        intervals: m.intervals.map(i => -i),
+        rhythm: [...m.rhythm],
+      }),
+      fragment: (m) => {
+        // Play just first half or second half
+        const half = Math.ceil(m.intervals.length / 2);
+        const startIdx = Math.random() < 0.5 ? 0 : m.intervals.length - half;
+        return {
+          intervals: m.intervals.slice(startIdx, startIdx + half),
+          rhythm: m.rhythm.slice(startIdx, startIdx + half),
+        };
+      },
+      ornamented: (m) => {
+        // Insert passing tones between motif notes
+        const ints = [];
+        const rhy = [];
+        for (let i = 0; i < m.intervals.length; i++) {
+          ints.push(m.intervals[i]);
+          rhy.push(m.rhythm[i]);
+          // Insert passing tone between this and next note if interval > 1
+          if (i < m.intervals.length - 1) {
+            const diff = m.intervals[i + 1] - m.intervals[i];
+            if (Math.abs(diff) > 1) {
+              ints.push(m.intervals[i] + Math.sign(diff));
+              rhy.push(1);
+            }
+          }
+        }
+        return { intervals: ints, rhythm: rhy };
+      },
+      retrograde: (m) => ({
+        intervals: [...m.intervals].reverse(),
+        rhythm: [...m.rhythm].reverse(),
+      }),
+    };
+
+    // Pick a variation style based on current arrangement section
+    function getCurrentVariation() {
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const arr = preset && preset._arrangement;
+      if (!arr || !arr.sections || arr.sections.length === 0) return 'straight';
+      const section = arr.sections[currentSectionIdx];
+      // Section can specify a motifStyle, otherwise use position-based default
+      if (section.motifStyle) return section.motifStyle;
+      // Default rotation: solo=straight, fuller=ornamented, breakdown=fragment, return=transposed
+      const styles = ['straight', 'ornamented', 'fragment', 'transposed'];
+      return styles[currentSectionIdx % styles.length];
+    }
+
     function generatePhrase(startActivity, signalNorm, signalDirection) {
       const style = getMelodyStyle();
-      const phraseLen = Math.max(style.minLen, Math.min(style.maxLen, Math.round(style.minLen + (startActivity / 15) * (melodyDensityVal / 5))));
       const notes = [];
       const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
       const octOffset = melodyOctave;
 
       // Clamp melody to the 2nd octave of the pool (middle register, avoids very high notes)
-      const rangeStart = Math.floor(notesPerOctave * 1);        // start of 2nd pool octave
-      const rangeEnd = Math.floor(notesPerOctave * 2) - 1;      // last note of 2nd pool octave
+      const rangeStart = Math.floor(notesPerOctave * 1);
+      const rangeEnd = Math.floor(notesPerOctave * 2) - 1;
       const rangeSize = Math.max(1, rangeEnd - rangeStart);
       let baseIdx = rangeStart + Math.floor(signalNorm * rangeSize);
       baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + Math.floor(octOffset * notesPerOctave * 0.5)));
-      const signalJitter = Math.floor((Math.random() - 0.5) * 2); // tighter jitter
-      baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + signalJitter));
+      // Time-based drift — the phrase starting point wanders up and down the scale on a
+      // slow ~35s sine cycle, INDEPENDENT of the plant. Without this, a quiet plant locks
+      // the melody onto the same scale degree forever (observed: 55% of notes hitting B4).
+      // A second faster LFO adds short-term wobble so two nearby phrases don't align.
+      const driftSlow = Math.sin(Date.now() / 35000 * Math.PI * 2);   // ±1 over 35s
+      const driftFast = Math.sin(Date.now() / 7300  * Math.PI * 2);   // ±1 over 7.3s
+      const driftOffset = Math.round(driftSlow * rangeSize * 0.35 + driftFast * 2);
+      // Wider random jitter — ±2 scale degrees instead of ±1
+      const signalJitter = Math.floor((Math.random() - 0.5) * 5);
+      baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + signalJitter + driftOffset));
 
+      // If this preset has a motif, use a variation of it instead of random walk
+      if (currentMotif) {
+        const variationName = getCurrentVariation();
+        const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
+        const motif = variationFn(currentMotif);
+        // Per-section octave shift: chorus might lift +1 octave over verse
+        const curSec = getCurrentSection();
+        const octShift = (curSec && curSec.octaveShift) || 0;
+        const shiftedBase = baseIdx + octShift * notesPerOctave;
+        // Expand range so an upward shift can actually reach higher notes
+        const shiftedRangeEnd = Math.min(currentNotes.length - 1, rangeEnd + Math.max(0, octShift) * notesPerOctave);
+        const shiftedRangeStart = Math.max(0, rangeStart + Math.min(0, octShift) * notesPerOctave);
+        // Convert motif intervals (scale degrees relative to root) to note indices
+        for (let i = 0; i < motif.intervals.length; i++) {
+          const noteIdx = Math.max(shiftedRangeStart, Math.min(shiftedRangeEnd, shiftedBase + motif.intervals[i]));
+          const vel = Math.max(0.12, style.velStart - (i * style.velFade) + (i === 0 ? 0.04 : 0));
+          // Rhythm value (1/2/3) becomes gate multiplier
+          const gate = style.gateBase * motif.rhythm[i] + (Math.random() * 0.05 - 0.025);
+          notes.push({ note: currentNotes[noteIdx], vel, gate });
+        }
+        return notes;
+      }
+
+      // Fall back to random walk (for presets without _arrangement / motif)
+      const phraseLen = Math.max(style.minLen, Math.min(style.maxLen, Math.round(style.minLen + (startActivity / 15) * (melodyDensityVal / 5))));
       let curIdx = baseIdx;
       const degreesPerOctave = notesPerOctave;
 
@@ -2509,7 +3208,8 @@
           // Sometimes skip a step for rhythmic variety
           if (Math.random() < 0.7 || melodyPhraseIdx === 0) {
             const n = melodyPhrase[melodyPhraseIdx];
-            _noteLogSrc = 'melody'; triggerNote(n.note, n.gate, n.vel);
+            // Scale by voice level so fade-outs blend during section transitions
+            _noteLogSrc = 'melody'; triggerNote(n.note, n.gate, n.vel * voiceLevels.melody);
           }
           melodyPhraseIdx++;
           if (melodyPhraseIdx >= melodyPhrase.length) {
@@ -2523,6 +3223,10 @@
       // Detect activity spike to trigger new phrase — lower threshold for more melody
       const actDelta = currentActivity - prevActivityForMelody;
       prevActivityForMelody += (currentActivity - prevActivityForMelody) * 0.06; // slower follow = more triggers
+
+      // Voice-level gate: if the section says melody is silent, don't generate new phrases
+      // (existing phrase is allowed to finish naturally via the playback block above)
+      if (voiceLevels.melody < VOICE_ACTIVE_THRESHOLD) return;
 
       const cooldownMs = melodyCooldownSec * 1000;
       // Very low threshold — even tiny signal movements trigger phrases
@@ -2658,6 +3362,12 @@
     let percOnBeat = false;      // true on steps 0,4,8,12 (quarter notes)
     let percOnStep = false;      // true on any step advance
     let percBarStart = false;    // true on step 0 (top of bar)
+    // Per-bar drum variations — rolled once at bar start, consumed during the bar.
+    // Makes the drums feel humanized: stumble kicks, ghost snares, extra hat openings.
+    let _barStumbleKickStep = -1;
+    let _barGhostSnareStep = -1;
+    let _barOpenHatStep = -1;
+    let _barDoubleKickStep = -1;
 
     // Per-preset drum patterns — each preset has unique rhythmic DNA
     let percFeel = 'groovy';
@@ -2789,12 +3499,15 @@
         rimHits: [1, 3, 5, 7, 9, 11, 13, 15],
         bassHits: [0, 6, 8], bassWalk: true, swing: 0,  // syncopated 80s bass
       },
-      // Circuit — broken, glitchy, irregular
+      // Circuit — chiptune/NES feel. ROCK SOLID four-on-floor so the downbeat is
+      // unambiguous even with the square-wave lead firing 16ths on top.
+      // Previous "broken glitchy" recipe made the beat impossible to follow.
       circuit: {
-        kickHits: [0, 6, 7, 9, 12], kickAccent: [0, 7, 12],
-        snareHits: [3, 5, 10, 14], snareAccent: [5, 14],
-        hatHits: [1, 2, 4, 8, 11, 13, 15], hatAccent: [4, 11, 13],  // avoid kick steps
-        rimHits: [3, 5, 9, 15], bassHits: [0, 6, 9, 12], bassWalk: true, swing: 0,
+        kickHits: [0, 4, 8, 12], kickAccent: [0, 8], essentialKick: true,
+        snareHits: [4, 12], snareAccent: [4, 12],
+        hatHits: [2, 6, 10, 14], hatAccent: [6, 14],     // classic off-beat hats
+        rimHits: [15], rimAccent: [15],                  // single pickup accent
+        bassHits: [0, 4, 8, 12], bassWalk: false, swing: 0,
       },
       // Groovy — default, standard pocket
       groovy: {
@@ -2868,7 +3581,386 @@
       lofi:     { kickDecay:0.5, kickOct:3, snareDecay:0.25, hatDecay:0.1, hatFreq:3000, bassWave:'square', bassFiltOct:1.5, crush:true, velScale:0.55 },
     };
 
+    // --- DRUM KITS ---
+    // Each kit is a builder function that constructs its own drum synths from scratch.
+    // Unlike PERC_CHARS (which just tweaks parameters on a shared MembraneSynth),
+    // each kit defines its own synth topology — totally different sounds per kit.
+    // build(bus) → returns { kick, snare, hat, rim, _fxNodes } where each drum
+    // may have _click/_body/_sub sub-layers attached as properties.
+    const DRUM_KITS = {
+      // ========== LINN DRUM — 80s analog drum machine ==========
+      linndrum: {
+        name: '80s LinnDrum',
+        build(bus) {
+          const fx = [];
+          // KICK — tight sine membrane with transient click + 808-ish sub
+          const kickBus = new Tone.Gain(1.4).connect(bus); fx.push(kickBus);
+          const kick = new Tone.MembraneSynth({
+            pitchDecay: 0.02, octaves: 3.2,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.18 },
+          }).connect(kickBus);
+          const clickFilter = new Tone.Filter({ frequency: 3200, type: 'bandpass', Q: 2.5 }).connect(kickBus); fx.push(clickFilter);
+          const clickGain = new Tone.Gain(0.9).connect(clickFilter); fx.push(clickGain);
+          const click = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.012, sustain: 0, release: 0.005 },
+          }).connect(clickGain); fx.push(click);
+          const subGain = new Tone.Gain(0.85).connect(kickBus); fx.push(subGain);
+          const kickSub = new Tone.MembraneSynth({
+            pitchDecay: 0.05, octaves: 1.1, oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.38, sustain: 0, release: 0.22 },
+          }).connect(subGain); fx.push(kickSub);
+          kick._click = click; kick._sub = kickSub;
+
+          // SNARE — 80s clap-snare: 220Hz body + bright filtered noise
+          const snareBus = new Tone.Gain(1.0).connect(bus); fx.push(snareBus);
+          const body = new Tone.MembraneSynth({
+            pitchDecay: 0.008, octaves: 1,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.11, sustain: 0, release: 0.08 },
+          }).connect(snareBus); fx.push(body);
+          const noiseFilter = new Tone.Filter({ frequency: 3800, type: 'highpass', Q: 1 }).connect(snareBus); fx.push(noiseFilter);
+          const noiseGain = new Tone.Gain(0.9).connect(noiseFilter); fx.push(noiseGain);
+          const snare = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.13, sustain: 0, release: 0.08 },
+          }).connect(noiseGain);
+          snare._body = body;
+
+          // HAT — metallic bandpass, tight closed
+          const hatFilter = new Tone.Filter({ frequency: 9500, type: 'highpass', Q: 1.2 }).connect(bus); fx.push(hatFilter);
+          const hat = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.022, sustain: 0, release: 0.008 },
+          }).connect(hatFilter);
+
+          // RIM — high filter click
+          const rimFilter = new Tone.Filter({ frequency: 5500, type: 'bandpass', Q: 6 }).connect(bus); fx.push(rimFilter);
+          const rim = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.018, sustain: 0, release: 0.008 },
+          }).connect(rimFilter);
+
+          return { kick, snare, hat, rim, _fxNodes: fx };
+        },
+      },
+
+      // ========== CHIPTUNE — NES noise channel 4 simulation ==========
+      chiptune: {
+        name: 'NES Noise Channel',
+        build(bus) {
+          const fx = [];
+          // KICK — triangle thump (NES triangle channel) + LPF noise burst layered
+          const kickBus = new Tone.Gain(1.4).connect(bus); fx.push(kickBus);
+          const kick = new Tone.MembraneSynth({
+            pitchDecay: 0.03, octaves: 2.2,
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.1 },
+          }).connect(kickBus);
+          const kickNoiseFilter = new Tone.Filter({ frequency: 200, type: 'lowpass', Q: 1 }).connect(kickBus); fx.push(kickNoiseFilter);
+          const kickNoiseGain = new Tone.Gain(0.7).connect(kickNoiseFilter); fx.push(kickNoiseGain);
+          const click = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.05 },
+          }).connect(kickNoiseGain); fx.push(click);
+          kick._click = click; kick._sub = null;
+
+          // SNARE — bandpass noise burst, NES-style
+          const snareFilter = new Tone.Filter({ frequency: 1800, type: 'bandpass', Q: 1.2 }).connect(bus); fx.push(snareFilter);
+          const snare = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.04 },
+          }).connect(snareFilter);
+          snare._body = null;
+
+          // HAT — ultra HPF noise, super tight
+          const hatFilter = new Tone.Filter({ frequency: 12000, type: 'highpass', Q: 0.5 }).connect(bus); fx.push(hatFilter);
+          const hat = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.012, sustain: 0, release: 0.004 },
+          }).connect(hatFilter);
+
+          // RIM — tiny bandpass pop
+          const rimFilter = new Tone.Filter({ frequency: 4500, type: 'bandpass', Q: 5 }).connect(bus); fx.push(rimFilter);
+          const rim = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.018, sustain: 0, release: 0.005 },
+          }).connect(rimFilter);
+
+          return { kick, snare, hat, rim, _fxNodes: fx };
+        },
+      },
+
+      // ========== BRUSHES — jazz brush kit, sustained noise sweeps ==========
+      brushes: {
+        name: 'Jazz Brushes',
+        build(bus) {
+          const fx = [];
+          // KICK — very soft low sine, barely there
+          const kickBus = new Tone.Gain(0.9).connect(bus); fx.push(kickBus);
+          const kick = new Tone.MembraneSynth({
+            pitchDecay: 0.08, octaves: 2,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.002, decay: 0.4, sustain: 0, release: 0.25 },
+          }).connect(kickBus);
+          kick._click = null;
+          const subGain = new Tone.Gain(0.4).connect(kickBus); fx.push(subGain);
+          const kickSub = new Tone.MembraneSynth({
+            pitchDecay: 0.1, octaves: 1.3, oscillator: { type: 'sine' },
+            envelope: { attack: 0.003, decay: 0.32, sustain: 0, release: 0.22 },
+          }).connect(subGain); fx.push(kickSub);
+          kick._sub = kickSub;
+
+          // SNARE — SUSTAINED brush swish: pink noise with medium attack + long-ish decay
+          // The attack is the secret — it's the sound of the brush DRAGGING across the head.
+          const snareFilter = new Tone.Filter({ frequency: 2400, type: 'bandpass', Q: 0.6 }).connect(bus); fx.push(snareFilter);
+          const snare = new Tone.NoiseSynth({
+            noise: { type: 'pink' },  // pink noise = more low-mid body
+            envelope: { attack: 0.025, decay: 0.35, sustain: 0.08, release: 0.3 },
+          }).connect(snareFilter);
+          snare._body = null;
+
+          // HAT — soft pink noise, medium decay (not a tick, a whisper)
+          const hatFilter = new Tone.Filter({ frequency: 7500, type: 'highpass', Q: 0.6 }).connect(bus); fx.push(hatFilter);
+          const hat = new Tone.NoiseSynth({
+            noise: { type: 'pink' },
+            envelope: { attack: 0.003, decay: 0.07, sustain: 0, release: 0.03 },
+          }).connect(hatFilter);
+
+          // RIM — wood-block click (narrow bandpass tick)
+          const rimFilter = new Tone.Filter({ frequency: 2200, type: 'bandpass', Q: 10 }).connect(bus); fx.push(rimFilter);
+          const rim = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.028, sustain: 0, release: 0.008 },
+          }).connect(rimFilter);
+
+          return { kick, snare, hat, rim, _fxNodes: fx };
+        },
+      },
+
+      // ========== BITCRUSHED LO-FI — dusty MPC feel ==========
+      bitcrushed_lofi: {
+        name: 'Dusty Lo-Fi',
+        build(bus) {
+          const fx = [];
+          // Crusher for dust/character — snare/hat/rim pass through it, kick bypasses to stay punchy
+          const crusher = new Tone.BitCrusher({ bits: 10 }).connect(bus); fx.push(crusher);
+
+          // KICK — triangle membrane with wide pitch sweep, BYPASSES crusher
+          const kickBus = new Tone.Gain(1.6).connect(bus); fx.push(kickBus);
+          const kick = new Tone.MembraneSynth({
+            pitchDecay: 0.025, octaves: 3.5,
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.001, decay: 0.55, sustain: 0, release: 0.3 },
+          }).connect(kickBus);
+          const clickFilter = new Tone.Filter({ frequency: 1200, type: 'bandpass', Q: 0.8 }).connect(kickBus); fx.push(clickFilter);
+          const clickGain = new Tone.Gain(0.4).connect(clickFilter); fx.push(clickGain);
+          const click = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.015, sustain: 0, release: 0.01 },
+          }).connect(clickGain); fx.push(click);
+          const subGain = new Tone.Gain(0.75).connect(kickBus); fx.push(subGain);
+          const kickSub = new Tone.MembraneSynth({
+            pitchDecay: 0.08, octaves: 1.2, oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.3 },
+          }).connect(subGain); fx.push(kickSub);
+          kick._click = click; kick._sub = kickSub;
+
+          // SNARE — goes THROUGH the crusher for dust
+          const snareBus = new Tone.Gain(0.95).connect(crusher); fx.push(snareBus);
+          const body = new Tone.MembraneSynth({
+            pitchDecay: 0.015, octaves: 1.2,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.1 },
+          }).connect(snareBus); fx.push(body);
+          const noiseFilter = new Tone.Filter({ frequency: 3200, type: 'highpass', Q: 0.8 }).connect(snareBus); fx.push(noiseFilter);
+          const noiseGain = new Tone.Gain(0.75).connect(noiseFilter); fx.push(noiseGain);
+          const snare = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.1 },
+          }).connect(noiseGain);
+          snare._body = body;
+
+          // HAT — dusty crushed
+          const hatFilter = new Tone.Filter({ frequency: 6800, type: 'highpass', Q: 0.8 }).connect(crusher); fx.push(hatFilter);
+          const hat = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.045, sustain: 0, release: 0.02 },
+          }).connect(hatFilter);
+
+          // RIM — small crushed click
+          const rimFilter = new Tone.Filter({ frequency: 4000, type: 'bandpass', Q: 5 }).connect(crusher); fx.push(rimFilter);
+          const rim = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.025, sustain: 0, release: 0.01 },
+          }).connect(rimFilter);
+
+          return { kick, snare, hat, rim, _fxNodes: fx };
+        },
+      },
+
+      // ========== TIGHT MODERN — clean crisp acoustic-ish kit ==========
+      tight_modern: {
+        name: 'Tight Modern',
+        build(bus) {
+          const fx = [];
+          // KICK — crisp sine membrane, medium sub, bright click
+          const kickBus = new Tone.Gain(1.4).connect(bus); fx.push(kickBus);
+          const kick = new Tone.MembraneSynth({
+            pitchDecay: 0.04, octaves: 3.5,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.18 },
+          }).connect(kickBus);
+          const clickFilter = new Tone.Filter({ frequency: 2800, type: 'bandpass', Q: 1.5 }).connect(kickBus); fx.push(clickFilter);
+          const clickGain = new Tone.Gain(0.95).connect(clickFilter); fx.push(clickGain);
+          const click = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.018, sustain: 0, release: 0.006 },
+          }).connect(clickGain); fx.push(click);
+          const subGain = new Tone.Gain(0.8).connect(kickBus); fx.push(subGain);
+          const kickSub = new Tone.MembraneSynth({
+            pitchDecay: 0.06, octaves: 1.3, oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.22 },
+          }).connect(subGain); fx.push(kickSub);
+          kick._click = click; kick._sub = kickSub;
+
+          // SNARE — clean noise + body
+          const snareBus = new Tone.Gain(1.05).connect(bus); fx.push(snareBus);
+          const body = new Tone.MembraneSynth({
+            pitchDecay: 0.01, octaves: 1,
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.08 },
+          }).connect(snareBus); fx.push(body);
+          const noiseFilter = new Tone.Filter({ frequency: 4500, type: 'highpass', Q: 1 }).connect(snareBus); fx.push(noiseFilter);
+          const noiseGain = new Tone.Gain(0.85).connect(noiseFilter); fx.push(noiseGain);
+          const snare = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.06 },
+          }).connect(noiseGain);
+          snare._body = body;
+
+          // HAT — bright closed
+          const hatFilter = new Tone.Filter({ frequency: 10500, type: 'highpass', Q: 0.8 }).connect(bus); fx.push(hatFilter);
+          const hat = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.005 },
+          }).connect(hatFilter);
+
+          // RIM — clean tick
+          const rimFilter = new Tone.Filter({ frequency: 5000, type: 'bandpass', Q: 5 }).connect(bus); fx.push(rimFilter);
+          const rim = new Tone.NoiseSynth({
+            noise: { type: 'white' },
+            envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.005 },
+          }).connect(rimFilter);
+
+          return { kick, snare, hat, rim, _fxNodes: fx };
+        },
+      },
+    };
+
+    // --- DRUMMERS ---
+    // Behavior personalities. Kit = sound, drummer = feel.
+    // Same kit played by different drummers sounds like different performances.
+    const DRUMMERS = {
+      the_machine: {
+        name: 'The Machine',
+        swing: 0,
+        humanize: 0,
+        ghostProb: 0,
+        variation: 0,
+        fillStyle: 'linn',
+        backbeatStrength: 1.0,
+        ornaments: [],
+        description: 'Robot. Pattern is law. No humanization.',
+      },
+      the_rocker: {
+        name: 'The Rocker',
+        swing: 0,
+        humanize: 0.35,
+        ghostProb: 0.2,
+        variation: 0.25,
+        fillStyle: 'straight',
+        backbeatStrength: 1.1,
+        ornaments: ['flam'],
+        description: 'Solid pocket. Four-on-floor trustworthy.',
+      },
+      the_cat: {
+        name: 'The Cat',
+        swing: 0.12,
+        humanize: 0.9,
+        ghostProb: 0.75,
+        variation: 0.6,
+        fillStyle: 'jazzy',
+        backbeatStrength: 0.95,
+        ornaments: ['flam', 'ghost', 'stumble'],
+        description: 'Dilla neo-soul. Behind the beat. Ghost heavy.',
+      },
+      the_professor: {
+        name: 'The Professor',
+        swing: 0.33,
+        humanize: 0.75,
+        ghostProb: 0.55,
+        variation: 0.5,
+        fillStyle: 'jazzy',
+        backbeatStrength: 0.8,
+        ornaments: ['flam', 'ghost'],
+        description: 'Jazz brushes. Triplet swing. Soft dynamics.',
+      },
+      the_ghost: {
+        name: 'The Ghost',
+        swing: 0,
+        humanize: 0.3,
+        ghostProb: 0.4,
+        variation: 0.3,
+        fillStyle: 'broken',
+        backbeatStrength: 1.3,
+        ornaments: ['ghost'],
+        description: 'Trip-hop. Half-time. Sparse. Heavy snare.',
+      },
+    };
+
+    // Decorator: wraps a Tone synth's triggerAttackRelease so back-to-back calls
+    // within the same audio clock tick get bumped to strictly-increasing start times.
+    // Tone.js throws "Start time must be strictly greater than previous start time"
+    // when two triggers resolve to the same `now`, which happens often with fast perc.
+    function makeMonotonic(synth) {
+      if (!synth || synth._monotonicWrapped) return synth;
+      synth._monotonicWrapped = true;
+      synth._lastTrigTime = 0;
+      const origTAR = synth.triggerAttackRelease.bind(synth);
+      const origTA = synth.triggerAttack ? synth.triggerAttack.bind(synth) : null;
+      synth.triggerAttackRelease = function(note, duration, time, velocity) {
+        let t = time;
+        if (t === undefined) {
+          t = Tone.now();
+          if (t <= synth._lastTrigTime) t = synth._lastTrigTime + 0.001;
+        }
+        synth._lastTrigTime = t;
+        try { return origTAR(note, duration, t, velocity); }
+        catch (e) { /* swallow — don't crash the tick */ }
+      };
+      if (origTA) {
+        synth.triggerAttack = function(note, time, velocity) {
+          let t = time;
+          if (t === undefined) {
+            t = Tone.now();
+            if (t <= synth._lastTrigTime) t = synth._lastTrigTime + 0.001;
+          }
+          synth._lastTrigTime = t;
+          try { return origTA(note, t, velocity); }
+          catch (e) {}
+        };
+      }
+      return synth;
+    }
+
     function buildPercSynths() {
+      // Guard: can't build perc synths until the main audio graph exists
+      if (!masterGain) {
+        console.warn('[PlantPulse] buildPercSynths called before masterGain exists — skipping');
+        return;
+      }
       // Dispose old perc synths if rebuilding
       [percKick, percSnare, percHat, percRim, bassSynth].forEach(s => { if (s) try { s.dispose(); } catch(_){} });
       percFxNodes.forEach(n => { try { n.dispose(); } catch(_){} });
@@ -2876,7 +3968,7 @@
       if (percGain) try { percGain.dispose(); } catch(_){}
       if (bassGain) try { bassGain.dispose(); } catch(_){}
 
-      const ch = PERC_CHARS[percChar] || PERC_CHARS.standard;
+      const preset = FACTORY_PRESETS[currentPresetName];
 
       // Drum bus compressor — gentle, preserves transients
       const percCompressor = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.005, release: 0.15, knee: 10 }).connect(masterGain);
@@ -2886,75 +3978,43 @@
       const initPercVol = arrLayers.percActive ? percVolume : percVolume * 0.15;
       percGain = new Tone.Gain(initPercVol).connect(percCompressor);
 
-      // Optional distortion/crush on percussion bus
-      let percBus = percGain;
-      if (ch.dist) {
-        const d = new Tone.Distortion({ distortion: ch.dist, wet: 0.5 }).connect(percGain);
-        percBus = d;
-        percFxNodes.push(d);
-      }
-      if (ch.crush) {
-        const b = new Tone.BitCrusher({ bits: 6 }).connect(percGain);
-        percBus = b;
-        percFxNodes.push(b);
-      }
+      // Select the kit based on preset._drumKit (fallback to tight_modern)
+      const kitName = (preset && preset._drumKit) || 'tight_modern';
+      const kit = DRUM_KITS[kitName] || DRUM_KITS.tight_modern;
+      console.log(`%c[kit] %cbuilding ${kit.name}`, 'color:#fbbf24;font-weight:bold', 'color:#34d399');
 
-      // === KICK: pitched body (G2, audible on laptops) + click layer ===
-      const kickBus = new Tone.Gain(1.2).connect(percBus);
-      percKick = new Tone.MembraneSynth({
-        pitchDecay: 0.05, octaves: 2,
-        oscillator: { type: 'sine' },
-        envelope: { attack: 0.001, decay: ch.kickDecay, sustain: 0, release: 0.2 },
-      }).connect(kickBus);
-      const kickClick = new Tone.NoiseSynth({
-        noise: { type: 'white' },
-        envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.01 },
-      });
-      const kickClickFilter = new Tone.Filter({ frequency: 2500, type: 'bandpass', Q: 1.5 }).connect(kickBus);
-      const kickClickGain = new Tone.Gain(1.0).connect(kickClickFilter);
-      kickClick.connect(kickClickGain);
-      percFxNodes.push(kickBus, kickClickFilter, kickClickGain, kickClick);
-      percKick._click = kickClick;
+      // Build the kit — each kit defines its own synth topology
+      const built = kit.build(percGain);
+      percKick = built.kick;
+      percSnare = built.snare;
+      percHat = built.hat;
+      percRim = built.rim;
+      if (built._fxNodes) for (const n of built._fxNodes) percFxNodes.push(n);
 
-      // === SNARE: tonal body (MembraneSynth ~200Hz) + noise snap ===
-      const snareBus = new Tone.Gain(1).connect(percBus);
-      const snareBodySynth = new Tone.MembraneSynth({
-        pitchDecay: 0.01, octaves: 1,
-        oscillator: { type: 'sine' },
-        envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.1 },
-      }).connect(snareBus);
-      const snareNoiseFilter = new Tone.Filter({ frequency: 4000, type: 'highpass' }).connect(snareBus);
-      const snareNoiseGain = new Tone.Gain(0.8).connect(snareNoiseFilter);
-      percSnare = new Tone.NoiseSynth({
-        noise: { type: 'white' },
-        envelope: { attack: 0.001, decay: ch.snareDecay, sustain: 0, release: 0.08 },
-      }).connect(snareNoiseGain);
-      percFxNodes.push(snareBus, snareBodySynth, snareNoiseFilter, snareNoiseGain);
-      percSnare._body = snareBodySynth;
+      // Enforce monotonic start times on all drum parts (Tone.js crashes otherwise
+      // when two triggers land on the same audio clock tick)
+      makeMonotonic(percKick);
+      if (percKick._click) makeMonotonic(percKick._click);
+      if (percKick._sub)   makeMonotonic(percKick._sub);
+      makeMonotonic(percSnare);
+      if (percSnare._body) makeMonotonic(percSnare._body);
+      makeMonotonic(percHat);
+      makeMonotonic(percRim);
 
-      // === HAT: very high, very short tick ===
-      const hatFilter = new Tone.Filter({ frequency: 10000, type: 'highpass' }).connect(percBus);
-      percFxNodes.push(hatFilter);
-      percHat = new Tone.NoiseSynth({
-        noise: { type: 'white' },
-        envelope: { attack: 0.001, decay: Math.max(0.02, ch.hatDecay * 0.7), sustain: 0, release: 0.01 },
-      }).connect(hatFilter);
-
-      // === RIM: sharp metallic click ===
-      const rimFilter = new Tone.Filter({ frequency: 5000, type: 'bandpass', Q: 5 }).connect(percBus);
-      percFxNodes.push(rimFilter);
-      percRim = new Tone.NoiseSynth({
-        noise: { type: 'white' },
-        envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.01 },
-      }).connect(rimFilter);
-
-      // === BASS: pitched in octave 3 so laptops can play it ===
-      bassGain = new Tone.Gain(0.25).connect(masterGain);
+      // === BASS SYNTH (walking bass / riff player) — separate from the drum kit ===
+      // Uses PERC_CHARS for bass wave/filter since bass is a pitched instrument,
+      // not a drum. The drum kit only defines kick/snare/hat/rim.
+      const ch = PERC_CHARS[percChar] || PERC_CHARS.standard;
+      bassGain = new Tone.Gain(0.13).connect(masterGain);
+      const bassHPF = new Tone.Filter({ frequency: 65, type: 'highpass', Q: 0.707 }).connect(bassGain);
+      percFxNodes.push(bassHPF);
       bassSynth = new Tone.MonoSynth({
         oscillator: { type: ch.bassWave },
         envelope: { attack: 0.003, decay: 0.25, sustain: 0.5, release: 0.15 },
         filterEnvelope: { attack: 0.003, decay: 0.15, sustain: 0.4, release: 0.15, baseFrequency: 250, octaves: ch.bassFiltOct },
-      }).connect(bassGain);
+      }).connect(bassHPF);
+      makeMonotonic(bassSynth);
+      if (subBassSynth) makeMonotonic(subBassSynth);
     }
 
     function buildPercGrid() {
@@ -3023,11 +4083,63 @@
         // Smooth tier transitions — only allow ±1 per bar for musical flow
         if (targetTier > percLockedTier) percLockedTier = Math.min(percLockedTier + 1, targetTier);
         else if (targetTier < percLockedTier) percLockedTier = Math.max(percLockedTier - 1, targetTier);
-        // Mutate pattern seed for ghost note variation — every 2-4 bars
-        const barPeriod = 2 + Math.floor(Math.random() * 3); // 2-4 bars
-        if (Math.floor(Date.now() / (getSeqBeatMs() * 4 * barPeriod)) !== percPatternMutationSeed) {
-          percPatternMutationSeed = Math.floor(Date.now() / (getSeqBeatMs() * 4 * barPeriod));
-          _percPatternCache = {}; // force regeneration with new ghost placement
+        // Pattern seed is locked per section (if arrangement exists), otherwise every 4-8 bars
+        // This keeps drums consistent within a section — drummer doesn't change patterns mid-verse
+        const arr = FACTORY_PRESETS[currentPresetName]?._arrangement;
+        if (arr) {
+          // Tie seed to current section index — changes only on section transition
+          const newSeed = currentSectionIdx * 17 + percLockedTier * 3;
+          if (newSeed !== percPatternMutationSeed) {
+            percPatternMutationSeed = newSeed;
+            _percPatternCache = {};
+          }
+        } else {
+          // Legacy: mutate every 4-8 bars for non-arrangement presets
+          const legacyPeriod = Math.floor(Date.now() / (getSeqBeatMs() * 4 * 6));
+          if (legacyPeriod !== percPatternMutationSeed) {
+            percPatternMutationSeed = legacyPeriod;
+            _percPatternCache = {};
+          }
+        }
+
+        // === Per-bar drum variations ===
+        // Probabilities come from the drummer: variation controls stumbles/hats,
+        // ghostProb controls ghost snares specifically.
+        _barStumbleKickStep = -1;
+        _barGhostSnareStep = -1;
+        _barOpenHatStep = -1;
+        _barDoubleKickStep = -1;
+        // Look up drummer params at bar start
+        const _drummerAtBar = DRUMMERS[FACTORY_PRESETS[currentPresetName]?._drummer] || null;
+        const _varAtBar    = _drummerAtBar ? _drummerAtBar.variation : (FACTORY_PRESETS[currentPresetName]?._drumHumanize ?? 0.6);
+        const _ghostAtBar  = _drummerAtBar ? _drummerAtBar.ghostProb : _varAtBar;
+        const _ornamentsAtBar = _drummerAtBar ? (_drummerAtBar.ornaments || []) : [];
+        const _hasStumble = _ornamentsAtBar.includes('stumble') || _varAtBar > 0;
+        const _hasFlam    = _ornamentsAtBar.includes('flam') || _varAtBar > 0;
+        const _hasGhost   = _ornamentsAtBar.includes('ghost') || _ghostAtBar > 0;
+
+        const _modBar = sectionBarCount % 4;
+        // Stumble kick — bar-level 16th embellishment
+        if (_hasStumble && _modBar !== 3 && Math.random() < 0.35 * _varAtBar) {
+          const stumbleOptions = [3, 7, 11, 15];
+          const weights = [0.15, 0.35, 0.35, 0.15];
+          let r = Math.random(), acc = 0;
+          for (let i = 0; i < stumbleOptions.length; i++) {
+            acc += weights[i];
+            if (r <= acc) { _barStumbleKickStep = stumbleOptions[i]; break; }
+          }
+        }
+        // Ghost snare — uses dedicated ghost probability
+        if (_hasGhost && Math.random() < 0.25 * _ghostAtBar) {
+          const ghostOptions = [5, 7, 13];
+          _barGhostSnareStep = ghostOptions[Math.floor(Math.random() * ghostOptions.length)];
+        }
+        if (_varAtBar > 0 && Math.random() < 0.25 * _varAtBar) {
+          _barOpenHatStep = Math.random() < 0.6 ? 10 : 15;
+        }
+        // Flam/double kick — needs 'flam' ornament
+        if (_hasFlam && Math.random() < 0.15 * _varAtBar) {
+          _barDoubleKickStep = Math.random() < 0.5 ? 7 : 11;
         }
       }
 
@@ -3045,13 +4157,40 @@
       const ch = PERC_CHARS[percChar] || PERC_CHARS.standard;
       const vs = ch.velScale || 1;
 
-      // Humanize: slight random velocity variation (±15%) + ghost note dropout
+      // Plant activity pushes overall drum intensity within a locked pattern
+      // Range: 0.85x at 0% activity, 1.1x at 40%+ activity
+      // Pattern STAYS THE SAME — drummer just plays harder
+      const actIntensity = 0.85 + Math.min(currentActivity / 40, 1) * 0.25;
+
+      // --- Drummer lookup ---
+      // A "drummer" defines behavior (feel, variation, swing, fills). A kit defines sound.
+      // They compose: same kit, different drummer = same sounds, different performance.
+      // Fallback chain: preset._drummer → preset._drumHumanize scalar → default rocker feel.
+      const _drummerName = FACTORY_PRESETS[currentPresetName]?._drummer;
+      const _drummer = DRUMMERS[_drummerName] || null;
+      const _humanizePerc = _drummer
+        ? _drummer.humanize
+        : (FACTORY_PRESETS[currentPresetName]?._drumHumanize ?? 0.6);
+      const _ghostProb = _drummer ? _drummer.ghostProb : _humanizePerc;
+      const _variation = _drummer ? _drummer.variation : _humanizePerc;
+      const _backbeatStrength = _drummer ? _drummer.backbeatStrength : 1.0;
+      // Drummer-driven swing overrides the global percSwingAmt
+      if (_drummer && typeof _drummer.swing === 'number') {
+        percSwingAmt = _drummer.swing;
+      }
+
+      // Humanize: slight random velocity variation (±15%) + ghost note dropout.
+      // Ghost dropout scales by _humanizePerc — tight presets drop ALL ghosts (fully
+      // mechanical pattern), loose presets keep the random feel.
       const humanize = (baseVel, level) => {
         if (baseVel === 0) return 0;
-        // Ghost notes (level 1) have 30% chance to drop out
-        if (level === 1 && Math.random() < 0.3) return 0;
-        // ±12% velocity variation, clamped to 0.95 max to prevent clipping
-        return Math.min(0.95, baseVel * (0.88 + Math.random() * 0.24));
+        if (level === 1) {
+          // 0 humanize = 100% drop, 1.0 humanize = 30% drop (original)
+          const dropChance = 1 - (_humanizePerc * 0.7);
+          if (Math.random() < dropChance) return 0;
+        }
+        // ±12% variation, scaled by plant intensity, clamped to 0.95 max
+        return Math.min(0.95, baseVel * actIntensity * (0.88 + Math.random() * 0.24));
       };
 
       const patterns = getPercPatterns();
@@ -3060,28 +4199,164 @@
       let hatLevel = patterns.hat[tier][percStep];
       let rimLevel = patterns.rim[tier][percStep];
 
-      // Backbeat anchor — a good drummer drops a snare on 4 or 12 to keep the groove grounded
-      // Only fires if the recipe has no snare scheduled AND at low-ish probability
-      // so it doesn't crowd recipes that already have snare activity
-      if ((percStep === 4 || percStep === 12) && snareLevel === 0 && percChar !== 'whisper') {
-        // Check if the current bar already has a snare on another step — don't stack
+      // Fill bar — last bar of a section gets a drum fill to transition
+      // Detects: arrangement exists AND next bar would trigger transition.
+      // Honors per-section maxBars override.
+      const _arrFill = FACTORY_PRESETS[currentPresetName]?._arrangement;
+      if (_arrFill && _arrFill.sections && _arrFill.sections.length > 0) {
+        const _curSec = _arrFill.sections[currentSectionIdx];
+        const _maxBars = (_curSec && _curSec.maxBars) ?? _arrFill.maxBars ?? 16;
+        const isFillBar = sectionBarCount >= _maxBars;
+        if (isFillBar) {
+          // Replace the pattern with a fill — busy snare/rim on the second half, kick holds down 1 and 3
+          // This gives a "drum roll" feel leading into the next section
+          if (percStep >= 8) {
+            // Second half of the bar: add fill hits
+            const fillHits = {
+              8: { snare: 2 },
+              9: { snare: 1 }, // ghost
+              10: { snare: 2 },
+              11: { rim: 2 },
+              12: { snare: 2 },
+              13: { snare: 2 },
+              14: { rim: 3 },  // accent
+              15: { snare: 3 }, // big snare accent before the next section
+            };
+            const fh = fillHits[percStep];
+            if (fh) {
+              if (fh.snare !== undefined) snareLevel = Math.max(snareLevel, fh.snare);
+              if (fh.rim !== undefined) rimLevel = Math.max(rimLevel, fh.rim);
+              // During fill, hats drop out so the fill cuts through
+              hatLevel = 0;
+            }
+            // Crash on the final step of the fill bar — classic "boom" announcing the transition.
+            // Only on bigger sections (not the 4-bar breakdown snap, which would feel overkill).
+            if (percStep === 15 && _maxBars >= 6) {
+              fireSectionCrash(0.55);
+            }
+          }
+        }
+      }
+
+      // Mid-section 4-bar accents — a softer crash every 4 bars INSIDE a section gives
+      // the listener an implicit phrase boundary without a full transition. Only on the
+      // downbeat of bar 5, 9, 13 (avoids clashing with the fill bar at the section end).
+      if (percStep === 0 && sectionBarCount > 0 && sectionBarCount % 4 === 0) {
+        const _arrMid = FACTORY_PRESETS[currentPresetName]?._arrangement;
+        const _curSecMid = _arrMid && _arrMid.sections && _arrMid.sections[currentSectionIdx];
+        const _secMaxBars = (_curSecMid && _curSecMid.maxBars) ?? _arrMid?.maxBars ?? 16;
+        // Don't fire if this IS the section end (the fill crash will cover it)
+        // and only for sections longer than 4 bars to avoid crashing the breakdown
+        if (sectionBarCount < _secMaxBars && _secMaxBars >= 8) {
+          fireSectionCrash(0.35); // softer than entry/fill crashes
+        }
+      }
+
+      // Backbeat anchor — a drummer adds snare on 4 or 12 if the bar has no snare.
+      // Scaled by humanize — tight presets trust the pattern, loose presets improvise.
+      if ((percStep === 4 || percStep === 12) && snareLevel === 0 && percChar !== 'whisper' && _humanizePerc > 0) {
         const barPattern = patterns.snare[tier];
         const barHasSnare = barPattern.some(s => s > 0);
-        if (!barHasSnare && Math.random() < 0.5) {
+        if (!barHasSnare && Math.random() < 0.5 * _humanizePerc) {
           snareLevel = 2;
           hatLevel = 0;
           rimLevel = 0;
         }
       }
 
-      const kickVel = humanize(velMap[kickLevel] * vs, kickLevel);
-      const snareVel = humanize(velMap[snareLevel] * vs, snareLevel);
-      const hatVel = humanize(velMap[hatLevel] * vs, hatLevel);
-      const rimVel = humanize(velMap[rimLevel] * vs, rimLevel);
+      // Per-section drum style — specified in arrangement section config
+      // Styles: 'full' (default), 'thin', 'drop', 'halftime', 'skip-1'
+      let drumStyle = 'full';
+      if (_arrFill && _arrFill.sections && _arrFill.sections[currentSectionIdx]) {
+        drumStyle = _arrFill.sections[currentSectionIdx].drumStyle || 'full';
+      }
 
-      // Occasional spontaneous fill — 15% chance at bar end (steps 14-15) when activity > 15%
+      // Apply drum style transforms to the base pattern
+      if (drumStyle === 'thin') {
+        // Thin out: drop snare to ghost, kick on 0/8 only, hat sparser
+        if (snareLevel > 1) snareLevel = 1;
+        if (kickLevel > 0 && percStep !== 0 && percStep !== 8) kickLevel = 0;
+        if (hatLevel > 0 && percStep % 4 !== 0) hatLevel = 0;
+      } else if (drumStyle === 'drop') {
+        // Drop out: silence everything except an occasional rim tick on 4/12
+        kickLevel = 0;
+        snareLevel = 0;
+        hatLevel = 0;
+        if (percStep !== 4 && percStep !== 12) rimLevel = 0;
+      } else if (drumStyle === 'halftime') {
+        // Half-time: snare on 8 only (instead of 4/12), kick on 0 only
+        if (snareLevel > 0 && percStep !== 8) snareLevel = 0;
+        if (snareLevel === 0 && percStep === 8) snareLevel = 3; // strong snare on 8
+        if (kickLevel > 0 && percStep !== 0) kickLevel = 0;
+      } else if (drumStyle === 'skip-1') {
+        // Jazzy lofi: skip the downbeat, emphasize 2 and 3
+        if (percStep === 0) { kickLevel = 0; }
+        if (percStep === 2 && kickLevel === 0) kickLevel = 2;
+        if (percStep === 6 && kickLevel === 0) kickLevel = 2;
+      }
+
+      // === Apply per-bar drum variations ===
+      // Only during 'full' drum style — thin/drop/halftime want to stay sparse.
+      if (drumStyle === 'full' && percChar !== 'whisper') {
+        // Stumble kick — soft extra kick, ghost level
+        if (percStep === _barStumbleKickStep && kickLevel === 0) {
+          kickLevel = 1; // ghost-level for a subtle stumble
+        }
+        // Double kick — an extra 16th-note kick right before a main kick, creates "d-dum"
+        if (percStep === _barDoubleKickStep && kickLevel === 0) {
+          kickLevel = 1;
+        }
+        // Ghost snare — very soft snare on a "ghost position"
+        if (percStep === _barGhostSnareStep && snareLevel === 0 && hatLevel === 0) {
+          snareLevel = 1;
+        }
+        // Open hat — brighter/louder hat on step 10 or 15
+        if (percStep === _barOpenHatStep && hatLevel < 2) {
+          hatLevel = 2;
+        }
+      }
+
+      // Activity-driven decoration — more hits when plant is active
+      // Only in 'full' or 'skip-1' styles — thin/drop/halftime want to stay sparse.
+      // Scaled by humanize so tight presets stay mechanical.
+      const decorChance = Math.min(0.25, currentActivity / 160) * _humanizePerc;
+      if (decorChance > 0.02 && percChar !== 'whisper' && (drumStyle === 'full' || drumStyle === 'skip-1')) {
+        if (snareLevel === 0 && hatLevel === 0 && percStep % 2 === 1 && Math.random() < decorChance) {
+          snareLevel = 1;
+        }
+        if (hatLevel === 0 && snareLevel === 0 && kickLevel === 0 && Math.random() < decorChance * 0.7) {
+          hatLevel = 1;
+        }
+      }
+
+      // Micro-variations every 4 bars — keeps long sections from feeling repetitive.
+      // Scaled by humanize: circuit/synthwave stay identical every 4 bars, lofi evolves.
+      const barInSection = sectionBarCount;
+      if (drumStyle === 'full' && percChar !== 'whisper' && _humanizePerc > 0) {
+        // Every 4 bars, open-hat feel on beat 8 (swap hat for rim)
+        if (barInSection % 4 === 3 && percStep === 8 && hatLevel > 0 && Math.random() < _humanizePerc) {
+          hatLevel = Math.max(hatLevel, 2);
+        }
+        // Every 4 bars, pickup ghost snare on step 14 going into next bar
+        if (barInSection % 4 === 3 && percStep === 14 && snareLevel === 0 && Math.random() < _humanizePerc) {
+          snareLevel = 1;
+        }
+      }
+
+      // Per-section percBoost — chorus can hit harder than verse
+      const _secForBoost = _arrFill && _arrFill.sections && _arrFill.sections[currentSectionIdx];
+      const pBoost = (_secForBoost && _secForBoost.percBoost) || 1;
+      // Backbeat strength — snare gets a drummer-specific velocity multiplier on 4/12
+      const _isBackbeat = (percStep === 4 || percStep === 12);
+      const _snareBoost = _isBackbeat ? _backbeatStrength : 1.0;
+      const kickVel = Math.min(1, humanize(velMap[kickLevel] * vs, kickLevel) * pBoost);
+      const snareVel = Math.min(1, humanize(velMap[snareLevel] * vs, snareLevel) * pBoost * _snareBoost);
+      const hatVel = Math.min(1, humanize(velMap[hatLevel] * vs, hatLevel) * pBoost);
+      const rimVel = Math.min(1, humanize(velMap[rimLevel] * vs, rimLevel) * pBoost);
+
+      // Occasional spontaneous fill — at bar end when active. Scaled by humanize.
       const isFillZone = percStep >= 14 && currentActivity > 15;
-      if (isFillZone && Math.random() < 0.15) {
+      if (isFillZone && _humanizePerc > 0 && Math.random() < 0.15 * _humanizePerc) {
         // Quick flam: trigger an extra snare or rim hit
         if (percSnare && Math.random() < 0.5) {
           percSnare.triggerAttackRelease('32n', undefined, 0.3 * vs);
@@ -3091,8 +4366,27 @@
       }
 
       if (kickVel > 0) {
-        percKick.triggerAttackRelease('G2', '8n', undefined, kickVel);
+        // Main body kick — lower base note (C2 = 65Hz) gives deeper fundamental than G2.
+        // The MembraneSynth's octaves param sweeps up from here, so C2 with octaves=4
+        // starts around 1kHz and dives to ~65Hz — that's the classic kick "thwop".
+        percKick.triggerAttackRelease('C2', '8n', undefined, kickVel);
         if (percKick._click) percKick._click.triggerAttackRelease('32n', undefined, kickVel * 0.7);
+        // Sub-thump layer — pure low-frequency boom that carries on the sub driver.
+        // Fires at A1 (55Hz), sweeps narrow. This is what makes the kick "whump".
+        if (percKick._sub) percKick._sub.triggerAttackRelease('A1', '8n', undefined, kickVel * 0.85);
+        // Sidechain duck on BASS specifically — bass pumps out of the way when kick hits.
+        // This is the classic kick/bass separation trick in modern mixes.
+        // Duck hard (50%) but quick (180ms recovery) — barely noticeable as an effect,
+        // but creates huge space in the low end.
+        if (bassGain) {
+          const bDuckTarget = 0.13; // restore level — keep in sync with bassGain init
+          const bDucked = bDuckTarget * (1 - 0.5 * kickVel);
+          try {
+            bassGain.gain.cancelScheduledValues(Tone.now());
+            bassGain.gain.setValueAtTime(bDucked, Tone.now());
+            bassGain.gain.linearRampToValueAtTime(bDuckTarget, Tone.now() + 0.18);
+          } catch (_) {}
+        }
         // Sidechain duck — kick pumps the synth bus down
         // Lo-fi/lofi char gets deeper, slower pump (classic lo-fi sidechain feel)
         if (masterGain) {
@@ -3125,48 +4419,129 @@
       if (hatVel > 0) { percHat.triggerAttackRelease('32n', undefined, hatVel); logNoteEvent('hat', hatVel, 'perc'); }
       if (rimVel > 0) { percRim.triggerAttackRelease('32n', undefined, rimVel); logNoteEvent('rim', rimVel, 'perc'); }
 
-      // Bass — plays in the lowest octave only, walks scale degrees
+      // Bass — plays a FIXED RIFF that's the preset's hook. The riff is generated
+      // at preset load from the plant-seeded motif. It repeats identically every bar
+      // within a section (think Sweet Dreams, Billie Jean — commit to the riff).
+      // Section changes trigger variations (chorus inverts, breakdown fragments, etc).
       if (bassSynth) {
-        const bassStep = getPercPatterns().bass[tier][percStep];
-        if (bassStep > 0) {
-          // Lock bass to the very first octave of the note pool
-          const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
-          // Root is always note 0 (lowest root of the scale)
-          let rootIdx = 0;
-          let bassNote = currentNotes[rootIdx];
-          // Walking bass — step-based pattern with variation
-          const recipe = PERC_RECIPES[percFeel];
-          if (recipe && recipe.bassWalk) {
-            // Multiple walk patterns — pick based on 2-bar cycle for variation
-            const cycleBar = Math.floor(Date.now() / (getSeqBeatMs() * 4 * 2)) % 3;
-            const walkPatterns = [
-              // Root-3rd-5th walk
-              { 0:0, 1:1, 2:2, 3:1, 4:0, 5:2, 6:3, 7:2, 8:0, 9:1, 10:2, 11:3, 12:0, 13:2, 14:1, 15:2 },
-              // Descending walk
-              { 0:4, 1:3, 2:2, 3:1, 4:0, 5:1, 6:2, 7:3, 8:4, 9:3, 10:2, 11:1, 12:0, 13:1, 14:2, 15:3 },
-              // Syncopated
-              { 0:0, 1:2, 2:4, 3:2, 4:1, 5:3, 6:1, 7:4, 8:0, 9:3, 10:2, 11:4, 12:1, 13:3, 14:2, 15:0 },
-            ];
-            const walkOffsets = walkPatterns[cycleBar];
-            const offset = walkOffsets[percStep] || 0;
-            const targetIdx = Math.min(notesPerOctave - 1, rootIdx + offset);
-            bassNote = currentNotes[targetIdx];
+        const _arrBass = FACTORY_PRESETS[currentPresetName]?._arrangement;
+        const _curSecBass = _arrBass && _arrBass.sections && _arrBass.sections[currentSectionIdx];
+
+        // Rest-bar — every 4th bar has a chance to drop bass entirely. Low probability
+        // so the riff stays present most of the time.
+        const _barMod = sectionBarCount % 4;
+        const _inRestBar = (_barMod === 3) && (sectionBarCount > 0);
+        const _secDrumStyleForRest = (_curSecBass && _curSecBass.drumStyle) || 'full';
+        const skipBass = _inRestBar && _secDrumStyleForRest === 'full' && Math.random() < 0.18;
+
+        // Apply section motifStyle + per-bar pitch rotation.
+        // varyRiff rotates the pitch sequence by sectionBarCount so each bar hits
+        // a different starting pitch — this is the main source of melodic variety.
+        let activeRiff = null;
+        if (currentBassRiff && !skipBass) {
+          const variationName = (_curSecBass && _curSecBass.motifStyle) || 'straight';
+          activeRiff = varyRiff(currentBassRiff, variationName, sectionBarCount);
+        }
+
+        // The bassMap IS the riff — same lookup structure as before.
+        // Fallback: if no active riff (e.g. currentBassRiff is null), play a simple
+        // [0, 8] pattern on the root so bass is never completely silent.
+        let bassMap;
+        if (activeRiff && Object.keys(activeRiff).length > 0) {
+          bassMap = activeRiff;
+        } else if (!skipBass) {
+          bassMap = { 0: 0, 8: 0 };
+        } else {
+          bassMap = {};
+        }
+        const bassSteps = Object.keys(bassMap).map(Number);
+        const bassStep = bassMap[percStep] !== undefined ? 2 : 0;
+        const bassPattern = bassSteps;
+
+        // Style field unused now but referenced for the pickup gate
+        const bassStyle = 'riff';
+
+        // Determine if THIS step plays bass (pattern hit OR pickup 16th)
+        let playBass = bassStep > 0 && !skipBass;
+        let isPickup = false;
+        // Pickup 16th — on step 7 or 15, leading into the next strong beat.
+        // Only fires when the next step has a scheduled bass hit, and only outside 'push' style
+        // (push style already has pickups built in via step-before-kick logic).
+        if (!playBass && !skipBass && bassStyle !== 'push' && (percStep === 7 || percStep === 15)) {
+          const nextStep = (percStep + 1) % 16;
+          if (bassPattern.includes(nextStep) && Math.random() < 0.30) {
+            playBass = true;
+            isPickup = true;
           }
-          // Transpose down an octave for real bass range (octave 2 instead of 3)
-          try { bassNote = Tone.Frequency(bassNote).transpose(-12).toNote(); } catch(_) {}
-          const bassVelMap = [0, 0.2, 0.3, 0.4, 0.3, 0.3];
-          const bVel = bassVelMap[Math.min(bassStep, 5)] * vs;
-          bassSynth.triggerAttackRelease(bassNote, '4n', undefined, bVel);
-          // Sub-bass: octave below the bass note for full-range speakers
-          if (subBassSynth) {
+        }
+
+        if (playBass) {
+          // Use the interval from bassMap (motif-derived) to pick the pitch.
+          // Pickups grab the target note's interval with a chromatic lean below.
+          const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
+          let interval;
+          if (isPickup) {
+            const nextStep = (percStep + 1) % 16;
+            interval = bassMap[nextStep] || 0;
+          } else {
+            interval = bassMap[percStep] || 0;
+          }
+          // MODULO-WRAP the interval into the bass octave — motif intervals can be
+          // negative (-5, -3, etc.), which would otherwise all clamp to root=0 and
+          // flatten the bass to a single pitch. Wrapping preserves the melodic shape:
+          //    -5 → (notesPerOctave - 5) mod notesPerOctave   (a third below)
+          //    -2 → (notesPerOctave - 2) mod notesPerOctave
+          //    +4 → 4
+          const targetIdx = ((interval % notesPerOctave) + notesPerOctave) % notesPerOctave;
+          let bassNote = currentNotes[targetIdx];
+          // Pickup notes lean chromatically into the next strong beat — walk up by 1 semitone
+          // right before a landing beat.
+          let transposeSemis = -12; // default: down an octave
+          if (isPickup && Math.random() < 0.6) transposeSemis -= 1; // chromatic leading tone
+          try { bassNote = Tone.Frequency(bassNote).transpose(transposeSemis).toNote(); } catch(_) {}
+
+          // Velocity contrast — beat weight matters a LOT for groove feel.
+          // Beat 0 = strongest, beat 8 = strong, beats 4/12 = medium, pickups = soft.
+          let beatWeight;
+          if (isPickup)              beatWeight = 0.45;
+          else if (percStep === 0)   beatWeight = 1.00;  // downbeat: hit hard
+          else if (percStep === 8)   beatWeight = 0.85;  // mid-bar: strong
+          else if (percStep === 6)   beatWeight = 0.60;  // syncopated: medium-soft
+          else if (percStep % 4 === 0) beatWeight = 0.70; // other quarter notes
+          else                       beatWeight = 0.55;  // off-beats: soft
+          // Humanize ±12% and scale by pattern hit strength
+          // Pattern levels: 0=none, 1=ghost, 2=normal, 3=accent, 4-5=walk
+          const _stepStrengthMap = [0, 0.5, 0.75, 1.0, 0.9, 0.9];
+          const stepStrength = bassStep > 0 ? _stepStrengthMap[Math.min(bassStep, 5)] : 0.7;
+          const bVel = Math.min(1, beatWeight * stepStrength * (0.88 + Math.random() * 0.24) * vs);
+
+          // Duration variance — downbeats sustain, off-beats staccato, pickups ultra-short.
+          // Mixing note lengths is the single biggest kill for "plodding".
+          let bDur;
+          if (isPickup)              bDur = '16n';
+          else if (percStep === 0)   bDur = Math.random() < 0.5 ? '2n' : '4n';  // sometimes hold
+          else if (percStep === 8)   bDur = '4n';
+          else                       bDur = Math.random() < 0.4 ? '8n' : '4n';
+
+          // Bass does NOT get percBoost — that's reserved for drums. The bass should
+          // stay at a consistent level through sections so the DRUMS carry the dynamics.
+          // Breakdown still drops bass via drumStyle='drop' + voice levels in gen-bass.
+          const finalVel = Math.min(1, bVel);
+
+          bassSynth.triggerAttackRelease(bassNote, bDur, undefined, finalVel);
+          // Sub-bass: octave below the bass note — only on strong beats, skip pickups/staccato
+          if (subBassSynth && !isPickup && bDur !== '16n') {
             try {
               const subNote = Tone.Frequency(bassNote).transpose(-12).toNote();
-              subBassSynth.triggerAttackRelease(subNote, '4n', undefined, bVel * 0.7);
+              subBassSynth.triggerAttackRelease(subNote, bDur, undefined, finalVel * 0.65);
             } catch(_) {}
           }
-          logNoteEvent(bassNote, bVel, 'bass');
+          logNoteEvent(bassNote, finalVel, 'bass');
         }
       }
+
+      // Bass velocity map reused from the walking-bass block above
+      // (kept here for any legacy paths)
 
       // Update visual
       updatePercGridVisual();
@@ -3208,12 +4583,14 @@
     function musicTick() {
       if (!musicPlaying) return;
       logSignalState();
-      percTick();           // first — sets quantize flags for everything else
+      percTick();                   // first — sets quantize flags for everything else
       tickLFOs();
-      updateXYPad();        // morph synth params from XY position
-      applyMacros();        // macro gestures overwrite params with absolute ranges
-      updateArrangement();  // activity-driven layer fades
-      applySynthParams();   // push everything to Tone.js nodes
+      updateXYPad();                // morph synth params from XY position
+      applyMacros();                // macro gestures overwrite params with absolute ranges
+      updateArrangement();          // activity-driven layer fades
+      updateArrangementSection();   // bar-based section rotation (uses percBarStart)
+      smoothVoiceLevels();          // smooth voice levels toward section targets
+      applySynthParams();           // push everything to Tone.js nodes
       filterPulseTick();
       melodyTick();
       sequencerTick();
@@ -3234,16 +4611,22 @@
           if (vinylGain && vPreset && vPreset._vinyl) {
             vinylGain.gain.rampTo(vPreset._vinyl, 0.3);
           }
+          // Build per-role instruments now that the audio graph exists
+          if (vPreset) buildInstrumentsFromPreset(vPreset);
         }
         musicPlaying = true;
         btn.textContent = 'Stop';
         btn.classList.add('playing');
+        // Soft fade-in: mute master, then ramp up over 1 second
+        // Prevents startup transients (especially for resonant-filter presets like Wind)
+        if (masterGain) {
+          masterGain.gain.value = 0;
+          masterGain.gain.rampTo(clamp01(getModValue('amp_level')), 1.0);
+        }
         musicLoop = setInterval(musicTick, 50);
         startVisualization();
-        // Build perc synths and grid (but don't auto-open the tab)
         if (!percGain) buildPercSynths();
         buildPercGrid();
-        // Start drone if in drone mode
         if (SYNTH_PARAMS.seq_mode.value === 'drone') startDrone();
       } else {
         musicPlaying = false;
@@ -3428,6 +4811,9 @@
       MODULATABLE.forEach(name => {
         const knob = document.getElementById('knob_' + name);
         if (!knob) return;
+        // Per-role targets (e.g. "lead.filter_cutoff") don't have dedicated knobs —
+        // the base param knob reflects the global value, per-role values live in the patch bay.
+        if (!SYNTH_PARAMS[name]) return;
         const r = modRouting[name];
         const isModulated = r.source !== 'fixed' && r.depth !== 0;
         knob.classList.toggle('modulated', isModulated);
@@ -3712,7 +5098,16 @@
       { label: 'Amp', items: ['amp_level'] },
       { label: 'Effects', items: ['rev_wet','dly_fb','dly_wet','chr_rate','chr_wet','dist_amt'] },
       { label: 'Sequencer', items: ['seq_prob','seq_gate','pan'] },
+      // Per-instrument targets — only take effect when the current preset has _instruments defined
+      { label: 'Per-Instrument', items: MODULATABLE_PER_ROLE },
     ];
+
+    // Labels for per-role targets (since they don't have SYNTH_PARAMS entries)
+    const PER_ROLE_LABELS = {
+      filter_cutoff: 'Filter',
+      filter_res:    'Res',
+      dist_amt:      'Dist',
+    };
 
     // Map source IDs to their colors
     const SRC_COLORS = {};
@@ -3751,10 +5146,20 @@
         dstCol.appendChild(lbl);
         group.items.forEach(paramName => {
           const p = SYNTH_PARAMS[paramName];
+          // Per-role target? (e.g. "lead.filter_cutoff")
+          let labelText;
+          if (p) {
+            labelText = p.label;
+          } else if (paramName.indexOf('.') !== -1) {
+            const [role, param] = paramName.split('.');
+            labelText = `${role} · ${PER_ROLE_LABELS[param] || param}`;
+          } else {
+            labelText = paramName;
+          }
           const jack = document.createElement('div');
           jack.className = 'patch-jack patch-jack-dst';
           jack.dataset.dstId = paramName;
-          jack.innerHTML = `<div class="jack-socket" id="dst-jack-${paramName}"></div><span>${p ? p.label : paramName}</span>`;
+          jack.innerHTML = `<div class="jack-socket" id="dst-jack-${paramName}"></div><span>${labelText}</span>`;
           jack.addEventListener('mouseup', (e) => endPatchDrag(e, paramName));
           jack.addEventListener('mousedown', (e) => {
             if (patchDragState) return;
@@ -4080,7 +5485,26 @@
           chr_wet:{ source:'plant_raw', depth:0.4 },
           dly_wet:{ source:'plant_activity', depth:0.5 },
           osc1_detune:{ source:'lfo1', depth:0.2 },
-        }
+        },
+        _drumKit: 'tight_modern', _drummer: 'the_rocker',
+        _drumHumanize: 0.4,
+        _arrangement: {
+          minBars: 12, maxBars: 20,
+          sections: [
+            { name: 'flow',   motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.7, 'gen-bass': 0.8, 'gen-arp': 0.3, 'gen-mel': 0.3, drone: 0.5 } },
+            { name: 'build',  motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.9, 'gen-arp': 0.5, 'gen-mel': 0.4, drone: 0.6 } },
+            { name: 'rest',   motifStyle: 'fragment',   drumStyle: 'thin', voices: { melody: 0.3, 'gen-bass': 0.7, 'gen-arp': 0,   'gen-mel': 0.2, drone: 0.4 } },
+            { name: 'return', motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.3, drone: 0.5 } },
+          ],
+        },
+        _instruments: {
+          lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.01, decay: 0.4, sustain: 0.6, release: 0.6 }, cutoff: 3500, res: 1.2, level: 0.6 },
+          pad:  { type: 'poly', wave: 'fatsine', spread: 30, envelope: { attack: 1.8, decay: 1.0, sustain: 0.85, release: 3.5 }, cutoff: 1400, res: 0.5, level: 0.4 },
+          bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 4, envelope: { attack: 0.005, decay: 0.3, sustain: 0.6, release: 0.4 },
+                  filterEnv: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.4, baseFrequency: 85, octaves: 2.2 }, cutoff: 500, res: 1.2, level: 0.7 },
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 0.35 }, cutoff: 4500, res: 1.5, level: 0.5 },
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.1, decay: 0.4, sustain: 0.5, release: 1.4 }, cutoff: 2600, res: 0.8, level: 0.45 },
+        },
       },
 
       // BELLS — bright, percussive, short decay, high filter with resonance ping
@@ -4098,7 +5522,31 @@
           rev_wet:{ source:'plant_smooth', depth:0.6 },        // low voltage = dry, high = washed
           dly_wet:{ source:'plant_activity', depth:0.7 },      // activity adds echo
         }, lfo1_rate:3, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 75, _scale: 'pentatonic', _root: 'C',
-        _macros: { space: 'plant_activity', energy: 'plant_smooth' }
+        _macros: { space: 'plant_activity', energy: 'plant_smooth' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0.3,
+        // Bells — short phrases, sparkle variations
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            { name: 'chime',  motifStyle: 'straight',   drumStyle: 'thin', voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0,   'gen-mel': 0,   drone: 0.3 } },
+            { name: 'clouds', motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 0.6, 'gen-arp': 0.5, 'gen-mel': 0.3, drone: 0.5 } },
+            { name: 'still',  motifStyle: 'fragment',   drumStyle: 'drop', voices: { melody: 0.3, 'gen-bass': 0.3, 'gen-arp': 0,   'gen-mel': 0.2, drone: 0.4 } },
+          ],
+        },
+        _instruments: {
+          // Lead — bright sine bell with sharp attack and long shimmering tail
+          lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.2, sustain: 0, release: 2.5 }, cutoff: 9000, res: 4, level: 0.55 },
+          // Pad — soft fatsine wash to hold the harmonic space
+          pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 1.5, decay: 1.0, sustain: 0.6, release: 3.5 }, cutoff: 2500, res: 0.4, level: 0.35 },
+          // Bass — warm triangle, short and clean so it stays out of the bells' way
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 3, envelope: { attack: 0.005, decay: 0.4, sustain: 0.4, release: 0.5 },
+                  filterEnv: { attack: 0.01, decay: 0.3, sustain: 0.2, release: 0.5, baseFrequency: 90, octaves: 1.8 }, cutoff: 700, res: 0.8, level: 0.55 },
+          // Arp — ultra-short sine pluck, very high cutoff
+          arp:  { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.4 }, cutoff: 10000, res: 3, level: 0.4 },
+          // Fill — soft triangle drops between bell strikes
+          fill: { type: 'poly', wave: 'triangle', envelope: { attack: 0.1, decay: 0.6, sustain: 0.3, release: 1.2 }, cutoff: 4500, res: 1.0, level: 0.4 },
+        },
       },
 
       // PAD — warm detuned wash, spacious but controlled
@@ -4113,7 +5561,32 @@
           osc1_level:{ source:'plant_smooth', depth:0.3 },     // osc balance shifts
           osc2_level:{ source:'plant_raw', depth:0.3 },        // timbre morphs
         }, lfo1_rate:0.04, lfo1_wave:'triangle', _perc: false, _percFeel: 'whisper', _percChar: 'whisper', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 70, _scale: 'major', _root: 'E',
-        _macros: { space: 'plant_smooth' }
+        _macros: { space: 'plant_smooth' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0,
+        // Pad — very long slow-evolving sections, ambient Eno-style
+        _arrangement: {
+          minBars: 20, maxBars: 40,
+          sections: [
+            { name: 'rise',    motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0,   'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0, drone: 0.8 } },
+            { name: 'hold',    motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0, 'gen-mel': 0.2, drone: 1.0 } },
+            { name: 'swell',   motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.5, 'gen-bass': 0.7, 'gen-arp': 0, 'gen-mel': 0.4, drone: 1.0 } },
+            { name: 'recede',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0.1, drone: 0.7 } },
+          ],
+        },
+        _instruments: {
+          // Lead — rare melodic moments, soft fatsine
+          lead: { type: 'poly', wave: 'fatsine', spread: 15, envelope: { attack: 2.0, decay: 1.5, sustain: 0.7, release: 4.0 }, cutoff: 2200, res: 0.4, level: 0.45 },
+          // Pad — the star of the preset: massive detuned wash
+          pad:  { type: 'poly', wave: 'fatsawtooth', spread: 40, envelope: { attack: 4.0, decay: 3.0, sustain: 0.9, release: 6.0 }, cutoff: 1600, res: 0.3, level: 0.55 },
+          // Bass — slow-moving sub presence
+          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 3, envelope: { attack: 1.5, decay: 2.0, sustain: 0.8, release: 3.5 },
+                  filterEnv: { attack: 0.5, decay: 1.0, sustain: 0.6, release: 2.0, baseFrequency: 60, octaves: 1.5 }, cutoff: 400, res: 0.6, level: 0.55 },
+          // Arp — gentle triangle plucks (rarely used)
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.02, decay: 0.6, sustain: 0.2, release: 1.0 }, cutoff: 3500, res: 0.8, level: 0.35 },
+          // Fill — slow sine swells
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.0, sustain: 0.6, release: 3.0 }, cutoff: 2000, res: 0.5, level: 0.35 },
+        },
       },
 
       // PLUCK — sharp attack, zero sustain, fast arp, dry with light delay
@@ -4131,27 +5604,74 @@
           seq_prob:{ source:'plant_activity', depth:0.5 },     // activity = more notes
           osc2_level:{ source:'plant_smooth', depth:0.6 },     // voltage crossfades oscillators
         }, _perc: true, _percFeel: 'pluck', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 95, _scale: 'pentatonic', _root: 'A',
-        _macros: { energy: 'plant_activity' }
+        _macros: { energy: 'plant_activity' },
+        _drumKit: 'tight_modern', _drummer: 'the_rocker',
+        _drumHumanize: 0.2,
+        // Pluck — bouncy arp with tight arrangement
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            { name: 'intro',   minBars: 4, maxBars: 4, motifStyle: 'fragment',   drumStyle: 'thin',     voices: { melody: 0.3, 'gen-bass': 0.6, 'gen-arp': 0.5, 'gen-mel': 0, drone: 0.3 } },
+            { name: 'main',                           motifStyle: 'straight',   drumStyle: 'full',     voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.8, 'gen-mel': 0.4, drone: 0.5 } },
+            { name: 'break',   minBars: 4, maxBars: 8, motifStyle: 'fragment',   drumStyle: 'halftime', voices: { melody: 0.4, 'gen-bass': 0.7, 'gen-arp': 0.3, 'gen-mel': 0.5, drone: 0.4 } },
+            { name: 'return',                         motifStyle: 'ornamented', drumStyle: 'full',     entryAccent: 'crash', voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.9, 'gen-mel': 0.3, drone: 0.5 } },
+          ],
+        },
+        _instruments: {
+          // Lead — sharp sawtooth, zero sustain — classic pluck
+          lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 }, cutoff: 5000, res: 2.2, level: 0.6 },
+          // Pad — soft triangle, medium attack
+          pad:  { type: 'poly', wave: 'triangle', envelope: { attack: 1.0, decay: 0.8, sustain: 0.6, release: 2.0 }, cutoff: 2200, res: 0.6, level: 0.35 },
+          // Bass — tight mono-sawtooth with fast filter envelope
+          bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 3, envelope: { attack: 0.001, decay: 0.2, sustain: 0.4, release: 0.2 },
+                  filterEnv: { attack: 0.001, decay: 0.15, sustain: 0.2, release: 0.2, baseFrequency: 100, octaves: 2.5 }, cutoff: 600, res: 1.5, level: 0.65 },
+          // Arp — fastest possible: sawtooth, instant attack, super short decay
+          arp:  { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.15 }, cutoff: 6000, res: 2.5, level: 0.55 },
+          // Fill — triangle, slightly longer than arp
+          fill: { type: 'poly', wave: 'triangle', envelope: { attack: 0.005, decay: 0.25, sustain: 0.1, release: 0.4 }, cutoff: 4200, res: 1.2, level: 0.45 },
+        },
       },
 
       // WIND — filter-heavy, breathy, LFO-driven movement, barely any attack
       wind: {
-        osc1_wave:'sine', osc2_wave:'fatsine', osc1_level:0.5, osc2_level:0.25, osc2_detune:3, osc2_octave:-1, osc2_spread:8,
-        filter_cutoff:400, filter_res:8, filter_env_amt:0,
+        osc1_wave:'sine', osc2_wave:'fatsine', osc1_level:0.5, osc2_level:0.3, osc2_detune:3, osc2_octave:-1, osc2_spread:8,
+        filter_cutoff:1500, filter_res:3, filter_env_amt:0,
         amp_a:2, amp_d:3, amp_s:0.4, amp_r:4, amp_level:0.4,
         rev_decay:6, rev_wet:0.6, chr_wet:0.6, chr_rate:0.1,
         seq_mode:'drone', seq_prob:0.15,
         lfo1_rate:0.07, lfo1_wave:'sine', lfo1_depth:0.8,
         lfo2_rate:0.03, lfo2_wave:'triangle', lfo2_depth:0.5,
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.9 },  // huge filter sweep — the whole sound changes
-          filter_res:{ source:'plant_raw', depth:0.6 },        // resonance howls at extremes
-          osc1_level:{ source:'plant_raw', depth:0.5 },        // oscillator balance shifts
-          osc2_level:{ source:'plant_smooth', depth:-0.4 },    // inverse — one fades as other grows
-          chr_wet:{ source:'plant_smooth', depth:0.5 },        // chorus swells with position
-          amp_level:{ source:'plant_raw', depth:0.3 },         // volume breathes with signal
+          osc1_level:{ source:'plant_raw', depth:0.3 },        // oscillator balance shifts
+          osc2_level:{ source:'plant_smooth', depth:-0.3 },    // inverse — one fades as other grows
+          chr_wet:{ source:'plant_smooth', depth:0.3 },        // chorus swells
+          amp_level:{ source:'plant_raw', depth:0.2 },         // volume breathes
         }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 65, _scale: 'dorian', _root: 'D',
-        _macros: { tension: 'plant_smooth' }
+        _macros: { tension: 'plant_smooth' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0,
+        // Wind — long breathy sections, LFO-driven, drone preset
+        _arrangement: {
+          minBars: 16, maxBars: 32,
+          sections: [
+            { name: 'breeze',  motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0,   'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0.2, drone: 0.7 } },
+            { name: 'gale',    motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.4, 'gen-bass': 0.5, 'gen-arp': 0, 'gen-mel': 0.4, drone: 1.0 } },
+            { name: 'calm',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.2, 'gen-arp': 0, 'gen-mel': 0.1, drone: 0.5 } },
+          ],
+        },
+        _instruments: {
+          // Lead — airy sine with filter character, breathy attack
+          lead: { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.2, sustain: 0.5, release: 3.0 }, cutoff: 1800, res: 3.0, level: 0.4 },
+          // Pad — fatsine wash, very slow
+          pad:  { type: 'poly', wave: 'fatsine', spread: 20, envelope: { attack: 3.0, decay: 2.0, sustain: 0.7, release: 4.5 }, cutoff: 1400, res: 2.5, level: 0.5 },
+          // Bass — sine sub, very gentle
+          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 1.0, decay: 1.5, sustain: 0.6, release: 2.5 },
+                  filterEnv: { attack: 0.3, decay: 1.0, sustain: 0.5, release: 2.0, baseFrequency: 65, octaves: 1.2 }, cutoff: 500, res: 1.8, level: 0.45 },
+          // Arp — triangle whisper, rarely triggered
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.1, decay: 0.5, sustain: 0.2, release: 1.0 }, cutoff: 2500, res: 1.5, level: 0.3 },
+          // Fill — soft fatsine breath
+          fill: { type: 'poly', wave: 'fatsine', spread: 10, envelope: { attack: 1.2, decay: 1.0, sustain: 0.5, release: 2.5 }, cutoff: 1600, res: 2.0, level: 0.35 },
+        },
       },
 
       // GLASS — inharmonic, high resonance, percussive, lots of space
@@ -4169,18 +5689,42 @@
           dly_fb:{ source:'plant_smooth', depth:0.4 },         // echo trails follow position
           osc1_level:{ source:'plant_raw', depth:0.3 },        // brightness shift
         }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 70, _scale: 'wholeTone', _root: 'C',
-        _macros: { space: 'plant_smooth' }
+        _macros: { space: 'plant_smooth' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0,
+        // Glass — sparse drops over inharmonic shimmer
+        _arrangement: {
+          minBars: 12, maxBars: 20,
+          sections: [
+            { name: 'drops',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0.3, 'gen-mel': 0, drone: 0.5 } },
+            { name: 'clusters', motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 0.6, 'gen-arp': 0.6, 'gen-mel': 0.4, drone: 0.6 } },
+            { name: 'clear',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.2, 'gen-arp': 0,   'gen-mel': 0.2, drone: 0.4 } },
+          ],
+        },
+        _instruments: {
+          // Lead — pure resonant sine, very high cutoff
+          lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.5, sustain: 0, release: 3.0 }, cutoff: 14000, res: 10, level: 0.55 },
+          // Pad — soft sine, slow movement
+          pad:  { type: 'poly', wave: 'sine', envelope: { attack: 2.5, decay: 1.5, sustain: 0.6, release: 3.5 }, cutoff: 2500, res: 0.5, level: 0.35 },
+          // Bass — sine sub, clean
+          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.8 },
+                  filterEnv: { attack: 0.01, decay: 0.3, sustain: 0.2, release: 0.8, baseFrequency: 70, octaves: 1.5 }, cutoff: 550, res: 0.6, level: 0.5 },
+          // Arp — inharmonic resonant sine drips
+          arp:  { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 1.5 }, cutoff: 12000, res: 8, level: 0.4 },
+          // Fill — soft sine echoes
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.1, decay: 1.0, sustain: 0.3, release: 2.0 }, cutoff: 5000, res: 2.0, level: 0.35 },
+        },
       },
 
-      // ETHEREAL — vast cathedral, sub-drone below, shimmer above, ghostly echoes
+      // ETHEREAL — vast cathedral, sub-drone below, gentle shimmer above
       ethereal: {
         // OSC1: deep sub-drone, one octave down, wide detuned sine for foundation
-        osc1_wave:'fatsine', osc1_spread:30, osc1_level:0.5,
+        osc1_wave:'fatsine', osc1_spread:30, osc1_level:0.55,
         osc1_octave:-1,
-        // OSC2: high shimmer, two octaves up, quiet sine — like light through stained glass
-        osc2_wave:'sine', osc2_octave:2, osc2_detune:7, osc2_level:0.15, osc2_spread:0,
-        // Filter: open enough for the shimmer to come through
-        filter_cutoff:2500, filter_res:0.5, filter_env_amt:0,
+        // OSC2: subtle shimmer one octave up (not two) — warm, not piercing
+        osc2_wave:'sine', osc2_octave:1, osc2_detune:5, osc2_level:0.12, osc2_spread:5,
+        // Filter rolled off to soften highs
+        filter_cutoff:1800, filter_res:0.4, filter_env_amt:0,
         // Amp: very slow swell, long sustain, enormous release
         amp_a:5, amp_d:6, amp_s:0.7, amp_r:12, amp_level:0.4,
         // Massive space — near-infinite reverb, self-oscillating delay for ghostly trails
@@ -4200,7 +5744,31 @@
           rev_wet:{ source:'plant_smooth', depth:0.2 },        // space shifts subtly
           chr_wet:{ source:'plant_raw', depth:0.3 },           // chorus breathes
         }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 55, _scale: 'minor', _root: 'A',
-        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0,
+        // Ethereal — vast slow cathedral, 3-4 minute cycles
+        _arrangement: {
+          minBars: 24, maxBars: 40,
+          sections: [
+            { name: 'wash',   motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0,   'gen-mel': 0.2, drone: 1.0 } },
+            { name: 'swell',  motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.6, 'gen-bass': 0.7, 'gen-arp': 0.3, 'gen-mel': 0.4, drone: 1.0 } },
+            { name: 'still',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.3, 'gen-arp': 0,   'gen-mel': 0.1, drone: 0.6 } },
+          ],
+        },
+        _instruments: {
+          // Lead — shimmering sine, slow attack
+          lead: { type: 'poly', wave: 'sine', envelope: { attack: 2.0, decay: 2.0, sustain: 0.7, release: 5.0 }, cutoff: 3000, res: 0.6, level: 0.4 },
+          // Pad — massive fatsine wash, very slow
+          pad:  { type: 'poly', wave: 'fatsine', spread: 35, envelope: { attack: 5.0, decay: 4.0, sustain: 0.9, release: 8.0 }, cutoff: 1800, res: 0.4, level: 0.55 },
+          // Bass — deep fatsine sub-drone
+          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 2, envelope: { attack: 3.0, decay: 3.0, sustain: 0.8, release: 6.0 },
+                  filterEnv: { attack: 1.0, decay: 1.5, sustain: 0.6, release: 3.0, baseFrequency: 55, octaves: 1.2 }, cutoff: 400, res: 0.5, level: 0.55 },
+          // Arp — gentle sine shimmer
+          arp:  { type: 'poly', wave: 'sine', envelope: { attack: 0.05, decay: 0.8, sustain: 0.2, release: 1.5 }, cutoff: 4000, res: 1.0, level: 0.3 },
+          // Fill — slow sine breath
+          fill: { type: 'poly', wave: 'fatsine', spread: 15, envelope: { attack: 2.0, decay: 1.5, sustain: 0.5, release: 4.0 }, cutoff: 2200, res: 0.5, level: 0.35 },
+        },
       },
 
       // ORGANIC — warm, thick, distorted, gritty, like wood and earth
@@ -4221,7 +5789,32 @@
           osc2_level:{ source:'plant_smooth', depth:0.3 },     // second osc crossfade
           filter_res:{ source:'plant_raw', depth:0.3 },        // gentle resonance
         }, lfo1_rate:0.5, _perc: true, _percFeel: 'organic', _percChar: 'distorted', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 80, _scale: 'dorian', _root: 'G',
-        _macros: { energy: 'plant_activity' }
+        _macros: { energy: 'plant_activity' },
+        _drumKit: 'bitcrushed_lofi', _drummer: 'the_cat',
+        _drumHumanize: 0.9,
+        // Organic — bluesy rotation with drum style changes per section
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            { name: 'groove', motifStyle: 'straight',   drumStyle: 'full',     voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.4 } },
+            { name: 'solo',   motifStyle: 'ornamented', drumStyle: 'thin',     voices: { melody: 1.0, 'gen-bass': 0.6, 'gen-arp': 0,   'gen-mel': 0.2 } },
+            { name: 'break',  motifStyle: 'fragment',   drumStyle: 'halftime', voices: { melody: 0,   'gen-bass': 1.0, 'gen-arp': 0.2, 'gen-mel': 0.5 } },
+            { name: 'return', motifStyle: 'transposed', drumStyle: 'full',     voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.3 } },
+          ],
+        },
+        _instruments: {
+          // Lead — fat distorted sawtooth, warm and gritty
+          lead: { type: 'poly', wave: 'fatsawtooth', spread: 18, envelope: { attack: 0.02, decay: 0.5, sustain: 0.5, release: 0.8 }, cutoff: 2000, res: 2.5, distAmt: 0.15, level: 0.6 },
+          // Pad — warm fattriangle, rich harmonics
+          pad:  { type: 'poly', wave: 'fattriangle', spread: 15, envelope: { attack: 0.8, decay: 1.0, sustain: 0.7, release: 2.5 }, cutoff: 1400, res: 1.0, level: 0.45 },
+          // Bass — dirty mono-sawtooth, deep filter punch
+          bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 3, envelope: { attack: 0.003, decay: 0.4, sustain: 0.7, release: 0.6 },
+                  filterEnv: { attack: 0.005, decay: 0.3, sustain: 0.4, release: 0.5, baseFrequency: 80, octaves: 2.0 }, cutoff: 500, res: 2.0, distAmt: 0.1, level: 0.7 },
+          // Arp — gritty fatsawtooth plucks
+          arp:  { type: 'poly', wave: 'fatsawtooth', spread: 10, envelope: { attack: 0.005, decay: 0.25, sustain: 0, release: 0.4 }, cutoff: 3500, res: 2.0, distAmt: 0.08, level: 0.5 },
+          // Fill — soft fattriangle melodic fills
+          fill: { type: 'poly', wave: 'fattriangle', spread: 8, envelope: { attack: 0.05, decay: 0.6, sustain: 0.4, release: 1.2 }, cutoff: 2400, res: 1.2, level: 0.45 },
+        },
       },
 
       // SYNTHWAVE — bright, driving, punchy saws + square, classic 80s analog
@@ -4242,7 +5835,43 @@
           dist_amt:{ source:'plant_activity', depth:0.3 },     // activity adds warmth
           filter_res:{ source:'plant_smooth', depth:0.3 },     // gentle resonance shift
         }, lfo1_rate:1.5, _perc: true, _percFeel: 'synthwave', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 110, _scale: 'major', _root: 'C',
-        _macros: { energy: 'plant_activity' }
+        _macros: { energy: 'plant_activity' },
+        _drumKit: 'linndrum', _drummer: 'the_machine',
+        _drumHumanize: 0,
+        // Synth Wave — tight song structure with classic 80s dynamics
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            // Intro — sparse, just bass + hint of melody
+            { name: 'intro',     minBars: 4, maxBars: 4,  motifStyle: 'fragment',   drumStyle: 'thin',  percBoost: 0.8,
+              voices: { melody: 0.25, 'gen-bass': 0.8, 'gen-arp': 0,   'gen-mel': 0 } },
+            // Verse — melody lower register, drums regular, gen-arp off to leave headroom for the chorus
+            { name: 'verse',     minBars: 8, maxBars: 12, motifStyle: 'straight',   drumStyle: 'full',  percBoost: 0.9,
+              voices: { melody: 0.55, 'gen-bass': 1.0, 'gen-arp': 0, 'gen-mel': 0.2 } },
+            // Chorus — LIFT: +1 octave motif, louder drums, arps crash in, entry cymbal
+            { name: 'chorus',    minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full',  percBoost: 1.2,
+              octaveShift: 1, entryAccent: 'crash',
+              voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.7, 'gen-mel': 0.5 } },
+            // Breakdown drops — short classic 80s one-bar break then snaps back
+            { name: 'breakdown', minBars: 4, maxBars: 4,  motifStyle: 'fragment',   drumStyle: 'drop',  percBoost: 0.6,
+              voices: { melody: 0.2, 'gen-bass': 0.4, 'gen-arp': 0,   'gen-mel': 0 } },
+          ],
+        },
+        _instruments: {
+          // SYNTHWAVE IDENTITY: everything is detuned sawtooth with chorus in the shared chain.
+          // Warm mid cutoffs, moderate resonance, subtle distortion — classic analog 80s.
+          // Lead — fat detuned sawtooth, warm filter, subtle drive
+          lead: { type: 'poly', wave: 'fatsawtooth', spread: 24, envelope: { attack: 0.008, decay: 0.3, sustain: 0.75, release: 0.8 }, cutoff: 3200, res: 2.5, distAmt: 0.08, level: 0.65 },
+          // Pad — massive wide detuned saw wash, low cutoff for warmth
+          pad:  { type: 'poly', wave: 'fatsawtooth', spread: 42, envelope: { attack: 1.2, decay: 1.2, sustain: 0.8, release: 2.5 }, cutoff: 1600, res: 0.8, level: 0.42 },
+          // Bass — THE 80s synth bass — mono sawtooth, deep filter envelope sweep
+          bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 3, envelope: { attack: 0.003, decay: 0.35, sustain: 0.7, release: 0.35 },
+                  filterEnv: { attack: 0.001, decay: 0.25, sustain: 0.3, release: 0.35, baseFrequency: 70, octaves: 3.5 }, cutoff: 480, res: 2.3, distAmt: 0.05, level: 0.72 },
+          // Arp — sawtooth (NOT square — keep synthwave 100% saw-coherent), short attack, medium decay
+          arp:  { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.002, decay: 0.18, sustain: 0.15, release: 0.25 }, cutoff: 4500, res: 2.2, distAmt: 0.06, level: 0.55 },
+          // Fill — fat triangle for a softer timbral contrast WITHIN the saw palette
+          fill: { type: 'poly', wave: 'fattriangle', spread: 15, envelope: { attack: 0.03, decay: 0.5, sustain: 0.45, release: 1.0 }, cutoff: 2800, res: 1.4, level: 0.48 },
+        },
       },
 
       // CRYSTAL CAVE — sparse, huge reverb + delay, dripping echoes
@@ -4261,15 +5890,39 @@
           osc2_detune:{ source:'plant_smooth', depth:0.6 },    // detuning shifts with position
           osc2_level:{ source:'plant_raw', depth:0.5 },        // second voice fades in/out
         }, lfo1_rate:0.02, _perc: false, _percFeel: 'whisper', _percChar: 'whisper', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 65, _scale: 'pentatonic', _root: 'F',
-        _macros: { space: 'plant_smooth' }
+        _macros: { space: 'plant_smooth' },
+        _drumKit: 'brushes', _drummer: 'the_ghost',
+        _drumHumanize: 0,
+        // Crystal cave — sparse drops into huge reverb/delay, 2-3 minute sections
+        _arrangement: {
+          minBars: 16, maxBars: 28,
+          sections: [
+            { name: 'drops',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0.2, 'gen-mel': 0, drone: 0.5 } },
+            { name: 'echoes',   motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.6, 'gen-bass': 0.5, 'gen-arp': 0.4, 'gen-mel': 0.3, drone: 0.6 } },
+            { name: 'silence',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.2, 'gen-arp': 0,   'gen-mel': 0.1, drone: 0.3 } },
+          ],
+        },
+        _instruments: {
+          // Lead — pure sine, long tail lets reverb do the work
+          lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.002, decay: 2.0, sustain: 0, release: 4.5 }, cutoff: 7000, res: 2.5, level: 0.55 },
+          // Pad — fatsine wash
+          pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 3.0, decay: 2.5, sustain: 0.6, release: 5.0 }, cutoff: 2000, res: 0.5, level: 0.4 },
+          // Bass — soft sub, very gentle
+          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 0.05, decay: 1.0, sustain: 0.3, release: 1.5 },
+                  filterEnv: { attack: 0.02, decay: 0.5, sustain: 0.2, release: 1.0, baseFrequency: 60, octaves: 1.5 }, cutoff: 450, res: 0.8, level: 0.45 },
+          // Arp — sparse triangle drops
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.002, decay: 1.0, sustain: 0, release: 2.0 }, cutoff: 6500, res: 3.0, level: 0.45 },
+          // Fill — gentle sine echoes
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.1, decay: 1.5, sustain: 0.2, release: 3.0 }, cutoff: 4500, res: 1.5, level: 0.35 },
+        },
       },
 
-      // MIDNIGHT — dark, spacious, slow pulse, audible but restrained
+      // MIDNIGHT — dark, spacious, slow pulse, deep low end
       midnight: {
-        // OSC1: warm triangle for body — not sine (too pure/quiet)
-        osc1_wave:'triangle', osc1_level:0.6, osc1_spread:0,
-        // OSC2: sub-octave sine for deep foundation + fatsine for subtle movement
-        osc2_wave:'fatsine', osc2_octave:-1, osc2_level:0.4, osc2_spread:10, osc2_detune:3,
+        // OSC1: warm triangle one octave down for body
+        osc1_wave:'triangle', osc1_level:0.55, osc1_spread:0, osc1_octave:-1,
+        // OSC2: sub-octave fatsine TWO octaves down — deep sub foundation
+        osc2_wave:'fatsine', osc2_octave:-2, osc2_level:0.5, osc2_spread:12, osc2_detune:3,
         // Filter: 1200Hz lets harmonics through, slight resonance for character
         filter_cutoff:1200, filter_res:1.5, filter_env_amt:1.5,
         filter_env_a:0.01, filter_env_d:1.0, filter_env_s:0.4, filter_env_r:3,
@@ -4293,7 +5946,31 @@
           dly_wet:{ source:'plant_smooth', depth:0.3 },         // delay depth follows position
           rev_wet:{ source:'plant_smooth', depth:0.3 },         // space follows plant
         }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 60, _scale: 'minor', _root: 'D',
-        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' },
+        _drumKit: 'brushes', _drummer: 'the_ghost',
+        _drumHumanize: 0,
+        // Midnight — dark and slow, very long sections
+        _arrangement: {
+          minBars: 20, maxBars: 36,
+          sections: [
+            { name: 'dusk',   motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.6, 'gen-arp': 0, 'gen-mel': 0.2, drone: 0.7 } },
+            { name: 'deep',   motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 0.5, 'gen-bass': 0.8, 'gen-arp': 0, 'gen-mel': 0.3, drone: 1.0 } },
+            { name: 'still',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0,   'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0.1, drone: 0.5 } },
+          ],
+        },
+        _instruments: {
+          // Lead — dark triangle, slow attack
+          lead: { type: 'poly', wave: 'triangle', envelope: { attack: 1.5, decay: 1.5, sustain: 0.6, release: 3.5 }, cutoff: 1600, res: 1.5, level: 0.45 },
+          // Pad — deep fatsine
+          pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 3.0, decay: 2.5, sustain: 0.85, release: 5.0 }, cutoff: 1200, res: 0.8, level: 0.55 },
+          // Bass — DEEP fatsine sub — the foundation
+          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 2, envelope: { attack: 1.0, decay: 2.0, sustain: 0.8, release: 4.0 },
+                  filterEnv: { attack: 0.3, decay: 1.0, sustain: 0.6, release: 2.0, baseFrequency: 50, octaves: 1.3 }, cutoff: 350, res: 1.2, level: 0.6 },
+          // Arp — gentle triangle, rarely used
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.05, decay: 1.0, sustain: 0.2, release: 2.0 }, cutoff: 2500, res: 1.0, level: 0.35 },
+          // Fill — slow sine waves
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.5, sustain: 0.5, release: 3.5 }, cutoff: 1800, res: 0.8, level: 0.35 },
+        },
       },
 
       // CIRCUIT — chiptune: square lead + triangle bass (like NES), 8-bit character
@@ -4303,19 +5980,48 @@
         filter_cutoff:8000, filter_res:1, filter_env_amt:2,
         filter_env_a:0.001, filter_env_d:0.1, filter_env_s:0.3,
         amp_a:0.001, amp_d:0.1, amp_s:0.6, amp_r:0.08, amp_level:0.5,
-        dist_amt:0.15, dist_wet:0.3, dly_time:0.18, dly_fb:0.25, dly_wet:0.15,
-        rev_wet:0.1, rev_decay:1,
-        seq_mode:'generative', seq_voice:'poly', seq_prob:0.5, seq_gate:0.12,
+        dist_amt:0.08, dist_wet:0.2, dly_time:0.18, dly_fb:0.2, dly_wet:0.1,
+        rev_wet:0.08, rev_decay:0.8,
+        // Dropped seq_prob 0.5 → 0.35 — less melody clutter, beat can breathe
+        seq_mode:'generative', seq_voice:'poly', seq_prob:0.35, seq_gate:0.12,
         lfo1_rate:8, lfo1_wave:'square', lfo1_depth:0.4,
         _mod:{
           filter_cutoff:{ source:'lfo1', depth:0.5 },          // fast square LFO chops the filter
           osc2_level:{ source:'plant_smooth', depth:0.7 },     // voltage controls second voice volume
-          dist_amt:{ source:'plant_raw', depth:0.6 },          // raw voltage = crunch amount
-          seq_prob:{ source:'plant_smooth', depth:0.4 },       // note density from position
-          dly_fb:{ source:'plant_raw', depth:0.4 },            // echo from raw
+          dist_amt:{ source:'plant_raw', depth:0.4 },          // raw voltage = crunch amount
+          seq_prob:{ source:'plant_smooth', depth:0.3 },       // note density from position
+          dly_fb:{ source:'plant_raw', depth:0.3 },            // echo from raw
           amp_level:{ source:'plant_smooth', depth:0.3 },      // overall level follows voltage
-        }, _perc: true, _percFeel: 'circuit', _percChar: 'lofi', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 120, _scale: 'pentatonic', _root: 'C',
-        _macros: { energy: 'plant_activity' }
+        }, _perc: true, _percFeel: 'circuit', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 115, _scale: 'pentatonic', _root: 'C',
+        _macros: { energy: 'plant_activity' },
+        _drumKit: 'chiptune', _drummer: 'the_machine',
+        _drumHumanize: 0,
+        // Circuit — tight chiptune structure, mechanical 8-bit
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            { name: 'intro',  minBars: 4, maxBars: 4, motifStyle: 'fragment',   drumStyle: 'thin', voices: { melody: 0.4, 'gen-bass': 0.8, 'gen-arp': 0.5, 'gen-mel': 0 } },
+            { name: 'verse',                          motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 1.0, 'gen-arp': 0.7, 'gen-mel': 0.3 } },
+            { name: 'chorus',                         motifStyle: 'ornamented', drumStyle: 'full', entryAccent: 'crash', octaveShift: 1, voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.9, 'gen-mel': 0.5 } },
+            { name: 'break',  minBars: 4, maxBars: 4, motifStyle: 'fragment',   drumStyle: 'drop', voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0.2, 'gen-mel': 0 } },
+          ],
+        },
+        _instruments: {
+          // CIRCUIT IDENTITY: NES/Game-Boy chiptune. Narrow bandwidth (low cutoffs = lo-fi, not bright).
+          // All squares for pulse-channel vibe. Ultra-short envelopes — zero reverb tail from the synth.
+          // Triangle bass (NES channel 3). No distortion (chiptune is clean), no chorus character.
+          // Lead — pure square, NARROW cutoff (chiptune is not bright — it's tight)
+          lead: { type: 'poly', wave: 'square', envelope: { attack: 0.001, decay: 0.08, sustain: 0.55, release: 0.06 }, cutoff: 3200, res: 0.4, level: 0.55 },
+          // Pad — square (NES 2nd pulse channel) — still square, not triangle — chiptune is square-only
+          pad:  { type: 'poly', wave: 'square', envelope: { attack: 0.3, decay: 0.3, sustain: 0.5, release: 0.5 }, cutoff: 2200, res: 0.3, level: 0.32 },
+          // Bass — triangle (NES bass channel) — narrow muffled tone, not full-range
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 2, envelope: { attack: 0.001, decay: 0.08, sustain: 0.8, release: 0.08 },
+                  filterEnv: { attack: 0.001, decay: 0.08, sustain: 0.4, release: 0.08, baseFrequency: 130, octaves: 1.0 }, cutoff: 380, res: 0.3, level: 0.62 },
+          // Arp — square, RAPID-FIRE, tight narrow bandwidth
+          arp:  { type: 'poly', wave: 'square', envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, cutoff: 4200, res: 0.5, level: 0.52 },
+          // Fill — another square voice, slightly longer envelope
+          fill: { type: 'poly', wave: 'square', envelope: { attack: 0.002, decay: 0.12, sustain: 0.2, release: 0.1 }, cutoff: 3000, res: 0.35, level: 0.42 },
+        },
       },
 
       // PIANO — percussive hammer attack, natural decay, no sustain
@@ -4349,7 +6055,48 @@
         },
         _perc: false, _percFeel: 'calm', _percChar: 'soft',
         _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 72, _scale: 'major', _root: 'G',
-        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' },
+        _drumKit: 'brushes', _drummer: 'the_professor',
+        _drumHumanize: 0.3,
+        // Song structure: ambient pianist watching a plant grow
+        // 8 bars min / 20 bars max per section — ~27-67 seconds at 72 BPM
+        // Rolling 20-bar activity baseline; spike = current bar > 3x recent avg
+        _arrangement: {
+          minBars: 8, maxBars: 16,
+          sections: [
+            // Piano solo over strong chord anchors — motif played straight
+            { name: 'solo',    motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.9, 'gen-arp': 0,   'gen-mel': 0,   drone: 0.6 } },
+            // Fuller — ornamented with passing tones, arps sparkle in
+            { name: 'fuller',  motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 1.0, 'gen-arp': 0.5, 'gen-mel': 0.4, drone: 0.7 } },
+            // Breakdown — fragment of the motif, drums thin out (or drop entirely)
+            { name: 'breakdown', motifStyle: 'fragment', drumStyle: 'thin', voices: { melody: 0,   'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.6, drone: 0.5 } },
+            // Return — motif restated, drums back to full
+            { name: 'return',  motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.8, 'gen-arp': 0.3, 'gen-mel': 0.2, drone: 0.6 } },
+          ],
+        },
+        _instruments: {
+          // PIANO IDENTITY: strings. Real piano lives in the 100-1500 Hz body range, not
+          // synth-lead territory. Poly-mono gives us per-note filter envelopes so each
+          // note has a HAMMER attack (bright) that decays to a warm BODY (dark). That's
+          // what separates piano spectrally from synthwave/circuit's high-mid leads.
+          // Lead — poly-mono triangle with aggressive filter envelope (hammer → body)
+          lead: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 6,
+                  envelope: { attack: 0.001, decay: 2.8, sustain: 0.02, release: 2.0 },
+                  filterEnv: { attack: 0.001, decay: 0.18, sustain: 0.05, release: 1.5,
+                               baseFrequency: 350, octaves: 4.2 },
+                  cutoff: 2200, res: 0.3, level: 0.68 },
+          // Pad — sine at LOW cutoff — warm cello body, very different from ethereal's shimmer
+          pad:  { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.5, sustain: 0.7, release: 3.0 }, cutoff: 900, res: 0.3, level: 0.38 },
+          // Bass — deep muffled piano bass, very low cutoff (real piano bass is dark)
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 3,
+                  envelope: { attack: 0.001, decay: 2.5, sustain: 0.05, release: 1.5 },
+                  filterEnv: { attack: 0.001, decay: 0.25, sustain: 0.15, release: 1.5, baseFrequency: 55, octaves: 3.0 },
+                  cutoff: 350, res: 0.3, level: 0.55 },
+          // Arp — short triangle, warmer than synthwave/circuit arps
+          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.7 }, cutoff: 2800, res: 0.6, level: 0.45 },
+          // Fill — soft sine body fills (cello-like, not triangle)
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.02, decay: 0.8, sustain: 0.25, release: 1.3 }, cutoff: 1400, res: 0.4, level: 0.42 },
+        },
       },
 
       // LO-FI — chill beats, jazzy detuned keys, warm bitcrushed character
@@ -4386,7 +6133,49 @@
         _perc: true, _percFeel: 'lofi', _percChar: 'lofi',
         _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 70, _scale: 'minor', _root: 'E',
         _macros: { energy: 'plant_activity', space: 'plant_smooth' },
-        _vinyl: 0.65
+        _drumKit: 'bitcrushed_lofi', _drummer: 'the_cat',
+        _drumHumanize: 1.0,
+        _vinyl: 0.65,
+        // Lo-Fi — long chill sections, jazzy skip-beat feel in some sections
+        _arrangement: {
+          minBars: 16, maxBars: 32,
+          sections: [
+            // Main chill — full groove, melody + steady beat
+            { name: 'chill',  motifStyle: 'straight',   drumStyle: 'full',   voices: { melody: 1.0, 'gen-bass': 0.8, 'gen-arp': 0,   'gen-mel': 0.2 } },
+            // Fills — more texture, skip-1 jazzy feel
+            { name: 'fills',  motifStyle: 'ornamented', drumStyle: 'skip-1', voices: { melody: 0.6, 'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.5 } },
+            // Space — melody out, drums drop to half-time
+            { name: 'space',  motifStyle: 'fragment',   drumStyle: 'halftime', voices: { melody: 0, 'gen-bass': 0.7, 'gen-arp': 0, 'gen-mel': 0.3 } },
+            // Return to chill, melody back
+            { name: 'return', motifStyle: 'transposed', drumStyle: 'full',   voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.2, 'gen-mel': 0.2 } },
+          ],
+        },
+        // Per-instrument signal chains — each role has its own synth + filter + distortion + gain.
+        // This is the pilot preset for the Option B refactor; other presets still use the legacy osc1/osc2 path.
+        _instruments: {
+          // Lead — Rhodes-like triangle with soft attack and long tail; the "main" lo-fi keys voice
+          lead: { type: 'poly', wave: 'triangle',
+                  envelope: { attack: 0.02, decay: 0.7, sustain: 0.45, release: 1.6 },
+                  cutoff: 3200, res: 1.3, distAmt: 0.1, level: 0.65 },
+          // Pad — warm sine, very slow attack, sits behind the lead
+          pad:  { type: 'poly', wave: 'sine',
+                  envelope: { attack: 1.4, decay: 0.8, sustain: 0.85, release: 3.2 },
+                  cutoff: 1200, res: 0.6, level: 0.4 },
+          // Bass — Polyphonic MonoSynth: per-note filter envelope punch AND handles chord tones
+          bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 4,
+                  envelope: { attack: 0.005, decay: 0.35, sustain: 0.6, release: 0.5 },
+                  filterEnv: { attack: 0.005, decay: 0.25, sustain: 0.3, release: 0.5,
+                               baseFrequency: 90, octaves: 2.2 },
+                  cutoff: 550, res: 1.4, level: 0.75 },
+          // Arp — bright triangle, short envelope for percussive plucks
+          arp:  { type: 'poly', wave: 'triangle',
+                  envelope: { attack: 0.004, decay: 0.18, sustain: 0, release: 0.35 },
+                  cutoff: 4800, res: 1.8, level: 0.5 },
+          // Fill — soft sine, medium attack, fills the space between melody phrases
+          fill: { type: 'poly', wave: 'sine',
+                  envelope: { attack: 0.15, decay: 0.5, sustain: 0.55, release: 1.8 },
+                  cutoff: 2400, res: 1.0, level: 0.45 },
+        },
       },
     };
 
@@ -4433,8 +6222,22 @@
           if (chorusNode) chorusNode.wet.rampTo(SYNTH_PARAMS.chr_wet.value, 0.1);
         }, 150);
       } catch(_) {}
+      // --- Full state cleanup for preset switch ---
       droneNotes = [];
       melodyPhrase = []; melodyPhraseIdx = 0;
+      arpIndex = 0;                    // reset arp cycle position
+      lastSpikeValue = 0;              // reset spike mode state
+      lastSeqTime = 0;                 // reset sequencer timing
+      lastDroneUpdate = 0;             // force drone to refresh
+      prevActivityForMelody = 0;       // reset melody trigger follower
+      lastMelodyPhraseTime = 0;        // reset melody cooldown
+      percStep = 0;                    // reset percussion position
+      percPatternMutationSeed = 0;     // reset — section code will set it on next bar
+      _percPatternCache = {};
+      // Reset section tracking (resetArrangementSection is called later with preset data)
+      barActivityWindow = [];
+      currentSectionIdx = 0;
+      sectionBarCount = 0;
 
       // Reset to defaults first
       Object.keys(SYNTH_PARAMS).forEach(k => {
@@ -4509,7 +6312,8 @@
       if (preset._percFeel) percFeel = preset._percFeel;
       if (preset._percChar) percChar = preset._percChar;
       _percPatternCache = {}; // clear cached patterns on preset change
-      if (musicPlaying || percEnabled) buildPercSynths();
+      // Only rebuild if audio graph is up (masterGain exists) — otherwise defer to Play button
+      if (masterGain && (musicPlaying || percEnabled)) buildPercSynths();
 
       // Apply melody settings from preset
       if (preset._melodyEnabled !== undefined) {
@@ -4541,8 +6345,30 @@
       }
       if (preset._scale || preset._root) buildNotePool();
 
+      // Build per-role instruments from preset._instruments (disposes any previous ones).
+      // Presets without _instruments get instruments = {} and use the legacy osc1/osc2 path.
+      if (masterGain) buildInstrumentsFromPreset(preset);
+
       // Apply macros
       activeMacros = preset._macros ? { ...preset._macros } : {};
+
+      // Reset section-based arrangement state (voice levels follow preset's first section if defined)
+      resetArrangementSection();
+
+      // Generate a motif for presets with _arrangement — phrases will reference variations of this
+      if (preset._arrangement) {
+        currentMotif = generateMotif();
+        console.log(
+          `%c[motif] %cgenerated for ${name} ` +
+          `%cintervals=[${currentMotif.intervals.join(',')}] rhythm=[${currentMotif.rhythm.join(',')}]`,
+          'color:#a78bfa;font-weight:bold', 'color:#34d399', 'color:#8896b0'
+        );
+        // Also generate the BASS RIFF from the motif — this is the preset's hook.
+        currentBassRiff = generateBassRiff();
+      } else {
+        currentMotif = null;
+        currentBassRiff = null;
+      }
 
       // Vinyl noise layer
       if (vinylGain) vinylGain.gain.rampTo(preset._vinyl || 0, 0.3);
