@@ -76,11 +76,11 @@
     .status-dot.error { background: #f87171; box-shadow: 0 0 8px rgba(248,113,113,0.5); }
 
     .stats-bar {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
+      display: flex;
+      gap: 8px;
       flex: 1;
-      align-content: start;
+      flex-wrap: wrap;
+      align-items: stretch;
     }
 
     .section-panel {
@@ -104,82 +104,80 @@
     .stat-card {
       background: #0f1520;
       border: 1px solid #1a2540;
-      border-radius: 8px;
-      padding: 8px 12px;
-      transition: border-color 0.2s;
-    }
-
-    .stat-card:hover {
-      border-color: #2a3d5e;
+      border-radius: 6px;
+      padding: 6px 10px;
+      flex: 1;
+      min-width: 80px;
     }
 
     .stat-card .label {
-      font-size: 10px;
+      font-size: 8px;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: #8896b0;
-      margin-bottom: 4px;
+      letter-spacing: 1px;
+      color: #5a6a8a;
+      margin-bottom: 2px;
     }
 
     .stat-card .value {
-      font-size: 20px;
-      font-weight: 700;
+      font-size: 14px;
+      font-weight: 600;
       color: #e8ecf4;
     }
 
     .stat-card .value .unit {
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 400;
       color: #4d5d78;
     }
 
     .signal-layout {
       display: flex;
-      gap: 16px;
-      align-items: stretch;
+      gap: 10px;
+      align-items: center;
     }
 
     @media (max-width: 600px) {
-      .signal-layout { flex-direction: column; gap: 10px; }
-      .plant-info { max-width: none; border-right: none; padding-right: 0; border-bottom: 1px solid #1a2540; padding-bottom: 10px; }
-      .stats-bar { grid-template-columns: 1fr 1fr; }
+      .signal-layout { flex-wrap: wrap; }
+      .plant-info { border-right: none; padding-right: 0; }
+      .stats-bar { flex-wrap: wrap; }
     }
 
     .plant-info {
-      min-width: 200px;
-      max-width: 240px;
       display: flex;
-      flex-direction: column;
-      padding-right: 16px;
+      align-items: center;
+      gap: 8px;
+      padding-right: 10px;
       border-right: 1px solid #1a2540;
+      flex-shrink: 0;
     }
 
     .plant-info-label {
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: #4a5568;
-      margin-bottom: 4px;
+      display: none;
     }
 
     .plant-name {
       font-family: 'Cookie', cursive;
-      font-size: 32px;
+      font-size: 26px;
       font-weight: 400;
       color: #e8ecf4;
-      line-height: 1.1;
+      line-height: 1;
+      white-space: nowrap;
     }
 
     .plant-type {
-      font-size: 12px;
+      font-size: 10px;
       color: #c47a5a;
-      margin-bottom: auto;
+      white-space: nowrap;
+    }
+
+    .plant-name-group {
+      display: flex;
+      flex-direction: column;
     }
 
     .plant-info .activity-bar-inline {
-      margin-top: 10px;
-      padding-top: 8px;
-      border-top: 1px solid #1a2540;
+      min-width: 100px;
+      flex-shrink: 0;
     }
 
     .stats-bar .activity-bar-inline {
@@ -417,8 +415,7 @@
     .layer-bar-fill.seq { background: linear-gradient(90deg, #34d399, #6ea8fe); }
 
     /* --- Synth Panel --- */
-    .synth-panel { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2d4a; overflow: hidden; }
-    .synth-panel.open { display: block; }
+    .synth-panel { padding-top: 10px; overflow: hidden; }
     .synth-toggle { font-size: 9px; letter-spacing: 1px; color: #6ea8fe; cursor: pointer; user-select: none; margin-left: 8px; text-transform: uppercase; }
     .synth-toggle:hover { color: #93bbfd; }
     .synth-sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
@@ -440,16 +437,85 @@
     .synth-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 9px; color: #8896b0; }
     .synth-row label { min-width: 40px; }
 
-    /* --- Preset Buttons --- */
-    .preset-bar {
+    /* --- Preset Groups --- */
+    .preset-groups {
       display: flex;
+      gap: 10px;
       flex-wrap: wrap;
+    }
+    .preset-group {
+      flex: 1;
+      min-width: 160px;
+      background: #0c1018;
+      border: 1px solid #1a2540;
+      border-radius: 8px;
+      padding: 8px 10px 10px;
+    }
+    .preset-group-label {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #4a5568;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .preset-group-label .perc-badge {
+      font-size: 7px;
+      color: #d4956a;
+      letter-spacing: 1px;
+      margin-left: 4px;
+      opacity: 0.7;
+    }
+    .perc-strip-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #5a6a8a;
+    }
+    .perc-strip-toggle {
+      position: relative;
+      width: 44px;
+      height: 22px;
+      background: #1a2540;
+      border-radius: 11px;
+      cursor: pointer;
+      border: 1px solid #2a3d5e;
+      transition: all 0.25s;
+      flex-shrink: 0;
+    }
+    .perc-strip-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      background: #4a5568;
+      border-radius: 50%;
+      transition: all 0.25s;
+    }
+    .perc-strip-toggle.on {
+      background: rgba(212,149,106,0.2);
+      border-color: #d4956a;
+    }
+    .perc-strip-toggle.on::after {
+      left: 20px;
+      background: #d4956a;
+      box-shadow: 0 0 6px rgba(212,149,106,0.5);
+    }
+    .perc-strip-status {
+      display: none; /* status shown by toggle color now */
+    }
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
       gap: 5px;
     }
+    .preset-bar { display: none; } /* replaced by preset-groups */
     .preset-btn {
       font-size: 11px;
-      padding: 6px 14px;
-      border-radius: 5px;
+      padding: 10px 10px;
+      border-radius: 6px;
       border: 1px solid #2a3d5e;
       background: #0f1520;
       color: #6a7a9a;
@@ -459,6 +525,7 @@
       transition: all 0.2s;
       white-space: nowrap;
       font-family: inherit;
+      text-align: center;
     }
     .preset-btn:hover { border-color: #d4956a; color: #c0a080; background: rgba(212,149,106,0.05); }
     .preset-btn.active {
@@ -493,18 +560,63 @@
     .reset-btn:hover { border-color: #d4956a; color: #d4956a; }
 
     @media (max-width: 768px) {
-      .preset-bar { gap: 4px; }
-      .preset-btn { font-size: 9px; padding: 5px 10px; }
+      .preset-groups { gap: 6px; }
+      .preset-group { min-width: 130px; padding: 6px 8px 8px; }
+      .preset-btn { font-size: 9px; padding: 8px 6px; }
       .controls-row { gap: 6px; }
       .controls-row input[type="range"] { max-width: 60px; }
     }
     @media (max-width: 480px) {
-      .preset-btn { font-size: 8px; padding: 4px 8px; letter-spacing: 0.3px; }
+      .preset-groups { flex-direction: column; }
+      .preset-group { min-width: 0; }
+      .preset-btn { font-size: 9px; padding: 7px 6px; }
     }
 
+    /* --- Panel Tabs --- */
+    .panel-tabs {
+      display: flex;
+      gap: 2px;
+      margin-top: 10px;
+      border-bottom: 2px solid #1a2540;
+      padding: 0 2px;
+    }
+    .panel-tab {
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #4a5568;
+      padding: 8px 16px;
+      cursor: pointer;
+      user-select: none;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 6px 6px 0 0;
+      background: transparent;
+      transition: all 0.15s;
+      position: relative;
+      bottom: -2px;
+    }
+    .panel-tab:hover { color: #8896b0; background: rgba(26,37,64,0.3); }
+    .panel-tab.active {
+      color: #d4956a;
+      background: #0c1018;
+      border-color: #2a3d5e;
+      border-bottom: 2px solid #0c1018;
+      font-weight: 500;
+    }
+    .panel-tab-content {
+      display: none;
+      padding: 12px 4px;
+      background: #0c1018;
+      border: 1px solid #2a3d5e;
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+    }
+    .panel-tab-content.active { display: block; }
+
     /* --- Patch Bay --- */
-    .patch-bay { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2d4a; }
-    .patch-bay.open { display: block; }
+    .patch-bay { padding-top: 10px; }
     .patch-bay-toggle { font-size: 9px; letter-spacing: 1px; color: #d4956a; cursor: pointer; user-select: none; text-transform: uppercase; }
     .patch-bay-toggle:hover { color: #e8c8a0; }
     .patch-bay-inner { position: relative; display: flex; gap: 0; min-height: 200px; }
@@ -512,9 +624,11 @@
     .patch-col-src { min-width: 90px; align-items: flex-end; }
     .patch-col-dst { min-width: 90px; align-items: flex-start; }
     .patch-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-    .patch-svg .cable { pointer-events: stroke; cursor: pointer; stroke-width: 2.5; fill: none; opacity: 0.75; transition: opacity 0.15s; }
-    .patch-svg .cable:hover { stroke-width: 4; opacity: 1; }
-    .patch-svg .cable-drag { stroke-dasharray: 6 4; stroke-width: 2; fill: none; opacity: 0.5; }
+    .patch-svg .cable { pointer-events: stroke; cursor: pointer; stroke-width: 3; fill: none; opacity: 0.8; transition: opacity 0.15s, d 0.3s; }
+    .patch-svg .cable:hover { stroke-width: 4.5; opacity: 1; }
+    .patch-svg .cable-drag { stroke-width: 3; fill: none; opacity: 0.6; }
+    .patch-svg .plug { pointer-events: none; rx: 2; ry: 2; }
+    .patch-svg .plug-tip { pointer-events: none; }
     .patch-jack {
       display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 2px 6px;
       font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; color: #5a6a8a;
@@ -549,11 +663,10 @@
     .patch-depth-popup .remove-cable:hover { color: #fca5a5; }
 
     /* --- XY Morph Pad --- */
-    .xy-pad-section { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e2d4a; }
-    .xy-pad-section.open { display: block; }
+    .xy-pad-section { padding-top: 10px; }
     .xy-pad-toggle { font-size: 9px; letter-spacing: 1px; color: #a78bfa; cursor: pointer; user-select: none; text-transform: uppercase; }
     .xy-pad-toggle:hover { color: #c4b5fd; }
-    .xy-pad-layout { display: flex; gap: 12px; align-items: flex-start; }
+    .xy-pad-layout { display: flex; gap: 12px; align-items: flex-start; justify-content: center; }
     .xy-pad-container { position: relative; flex-shrink: 0; }
     .xy-pad {
       width: 200px; height: 200px; background: #0a0f18; border: 1px solid #1a2540;
@@ -622,16 +735,12 @@
 
     /* --- Percussion Sequencer --- */
     .perc-section {
-      margin-top: 4px;
       padding: 4px 8px;
-      border-top: 1px solid #1e2d4a;
-      display: none;
     }
-    .perc-section.active { display: block; }
-    .perc-section.perc-off #percDetails { display: none; }
-    #percDetails { display: none; }
-    #percDetails.open { display: block; }
     .perc-header {
+      display: none; /* header moved to tabs */
+    }
+    .perc-header-legacy {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -659,6 +768,8 @@
       grid-template-columns: 20px repeat(16, 1fr);
       gap: 1px;
       align-items: center;
+      max-width: 500px;
+      margin: 0 auto 6px;
     }
     .perc-label {
       font-size: 5px;
@@ -676,7 +787,10 @@
       min-height: 4px;
       transition: background 0.1s, box-shadow 0.1s;
     }
-    .perc-step.on { background: #2a3d5e; border-color: #3a4d6e; }
+    .perc-step.on { border-color: #3a4d6e; }
+    .perc-step.vel-1 { background: rgba(42,61,94,0.35); } /* ghost — dim */
+    .perc-step.vel-2 { background: rgba(42,61,94,0.65); } /* normal */
+    .perc-step.vel-3 { background: rgba(42,61,94,1.0); }  /* accent — bright */
     .perc-step.playing { background: #d4956a; box-shadow: 0 0 3px rgba(212,149,106,0.5); }
     .perc-step.on.playing { background: #e8b886; box-shadow: 0 0 4px rgba(212,149,106,0.7); }
     .perc-controls {
@@ -684,6 +798,7 @@
       gap: 6px;
       margin-top: 4px;
       align-items: center;
+      justify-content: center;
     }
     .perc-knob-group {
       display: flex;
@@ -969,11 +1084,12 @@
   <div class="section-panel">
     <div class="signal-layout">
       <div class="plant-info">
-        <div class="plant-info-label">Currently listening to</div>
-        <div class="plant-name" id="plantName">--</div>
-        <div class="plant-type" id="plantType">--</div>
+        <div class="plant-name-group">
+          <div class="plant-name" id="plantName">--</div>
+          <div class="plant-type" id="plantType">--</div>
+        </div>
         <div class="activity-bar-inline">
-          <div class="activity-bar-label">Plant Activity</div>
+          <div class="activity-bar-label">Activity</div>
           <div class="activity-bar">
             <div class="activity-bar-fill" id="activityFill"></div>
             <div class="activity-bar-value" id="activityValue">0%</div>
@@ -983,39 +1099,26 @@
       <div class="stats-bar">
         <div class="stat-card">
           <div class="label">Raw</div>
-          <div class="value" id="rawValue" style="font-size:16px">-- <span class="unit">mV</span></div>
+          <div class="value" id="rawValue">-- <span class="unit">mV</span></div>
         </div>
         <div class="stat-card">
           <div class="label">Smoothed</div>
-          <div class="value" id="smoothedValue" style="font-size:16px">-- <span class="unit">mV</span></div>
+          <div class="value" id="smoothedValue">-- <span class="unit">mV</span></div>
         </div>
         <div class="stat-card">
           <div class="label">Min / Max</div>
-          <div class="value" id="minMaxValue" style="font-size:16px">-- <span class="unit">mV</span></div>
+          <div class="value" id="minMaxValue">-- <span class="unit">mV</span></div>
         </div>
         <div class="stat-card">
-          <div class="label">Avg (60s)</div>
-          <div class="value" id="avgValue" style="font-size:16px">-- <span class="unit">mV</span></div>
+          <div class="label">Avg</div>
+          <div class="value" id="avgValue">-- <span class="unit">mV</span></div>
         </div>
       </div>
     </div>
-    <div class="channel-indicators" style="display:flex;gap:12px;margin-top:10px;padding:0 4px;">
-      <div class="ch-indicator" id="ch-ind-ch1" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
-        <span style="width:8px;height:8px;border-radius:50%;background:#34d399;opacity:0.3;display:inline-block;" id="ch-dot-ch1"></span>
-        Clips A
-        <span id="ch-val-ch1" style="color:#34d399;font-family:'SF Mono',monospace;">--</span>
-      </div>
-      <div class="ch-indicator" id="ch-ind-ch2" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
-        <span style="width:8px;height:8px;border-radius:50%;background:#6ea8fe;opacity:0.3;display:inline-block;" id="ch-dot-ch2"></span>
-        Clips B
-        <span id="ch-val-ch2" style="color:#6ea8fe;font-family:'SF Mono',monospace;">--</span>
-      </div>
-      <div class="ch-indicator" id="ch-ind-ch3" style="display:flex;align-items:center;gap:6px;font-size:11px;color:#8896b0;">
-        <span style="width:8px;height:8px;border-radius:50%;background:#f472b6;opacity:0.3;display:inline-block;" id="ch-dot-ch3"></span>
-        TENS Pads
-        <span id="ch-val-ch3" style="color:#f472b6;font-family:'SF Mono',monospace;">--</span>
-      </div>
-    </div>
+    <!-- Channel indicators (hidden until v2 multi-channel) -->
+    <div id="ch-ind-ch1" style="display:none"><span id="ch-dot-ch1"></span><span id="ch-val-ch1">--</span></div>
+    <div id="ch-ind-ch2" style="display:none"><span id="ch-dot-ch2"></span><span id="ch-val-ch2">--</span></div>
+    <div id="ch-ind-ch3" style="display:none"><span id="ch-dot-ch3"></span><span id="ch-val-ch3">--</span></div>
     <div class="signal-waveform" id="signalWaveform" style="display:none">
       <canvas class="waveform-canvas" id="waveformCanvas" style="width:100%;height:50px;border-radius:4px;margin-top:8px"></canvas>
     </div>
@@ -1024,22 +1127,44 @@
   <!-- Section 2: Music / Synthesizer -->
   <div class="section-panel section-music">
     <div class="music-header">
-      <div class="preset-bar" id="presetBar">
-        <button class="preset-btn active" data-preset="default" onclick="selectPreset('default')">Default</button>
-        <button class="preset-btn" data-preset="bells" onclick="selectPreset('bells')">Bells</button>
-        <button class="preset-btn" data-preset="pad" onclick="selectPreset('pad')">Pad</button>
-        <button class="preset-btn" data-preset="pluck" onclick="selectPreset('pluck')">Pluck</button>
-        <button class="preset-btn" data-preset="wind" onclick="selectPreset('wind')">Wind</button>
-        <button class="preset-btn" data-preset="glass" onclick="selectPreset('glass')">Glass</button>
-        <button class="preset-btn" data-preset="ethereal" onclick="selectPreset('ethereal')">Ethereal</button>
-        <button class="preset-btn" data-preset="organic" onclick="selectPreset('organic')">Organic</button>
-        <button class="preset-btn" data-preset="synthwave" onclick="selectPreset('synthwave')">Synth Wave</button>
-        <button class="preset-btn" data-preset="crystalcave" onclick="selectPreset('crystalcave')">Crystal Cave</button>
-        <button class="preset-btn" data-preset="midnight" onclick="selectPreset('midnight')">Midnight</button>
-        <button class="preset-btn" data-preset="circuit" onclick="selectPreset('circuit')">Circuit</button>
-        <button class="preset-btn" data-preset="piano" onclick="selectPreset('piano')">Piano</button>
+      <!-- Legacy preset-bar kept for JS compatibility but hidden -->
+      <div class="preset-bar" id="presetBar"></div>
+      <div class="preset-groups">
+        <div class="preset-group">
+          <div class="preset-group-label">Ambient</div>
+          <div class="preset-grid">
+            <button class="preset-btn" data-preset="pad" onclick="selectPreset('pad')">Pad</button>
+            <button class="preset-btn" data-preset="wind" onclick="selectPreset('wind')">Wind</button>
+            <button class="preset-btn" data-preset="ethereal" onclick="selectPreset('ethereal')">Ethereal</button>
+            <button class="preset-btn" data-preset="midnight" onclick="selectPreset('midnight')">Midnight</button>
+          </div>
+        </div>
+        <div class="preset-group">
+          <div class="preset-group-label">Melodic</div>
+          <div class="preset-grid">
+            <button class="preset-btn active" data-preset="default" onclick="selectPreset('default')">Default</button>
+            <button class="preset-btn" data-preset="bells" onclick="selectPreset('bells')">Bells</button>
+            <button class="preset-btn" data-preset="glass" onclick="selectPreset('glass')">Glass</button>
+            <button class="preset-btn" data-preset="crystalcave" onclick="selectPreset('crystalcave')">Crystal Cave</button>
+            <button class="preset-btn" data-preset="piano" onclick="selectPreset('piano')">Piano</button>
+          </div>
+        </div>
+        <div class="preset-group">
+          <div class="preset-group-label">Rhythmic <span class="perc-badge">+ Percussion</span></div>
+          <div class="preset-grid">
+            <button class="preset-btn" data-preset="pluck" onclick="selectPreset('pluck')">Pluck</button>
+            <button class="preset-btn" data-preset="organic" onclick="selectPreset('organic')">Organic</button>
+            <button class="preset-btn" data-preset="synthwave" onclick="selectPreset('synthwave')">Synth Wave</button>
+            <button class="preset-btn" data-preset="circuit" onclick="selectPreset('circuit')">Circuit</button>
+            <button class="preset-btn" data-preset="lofi" onclick="selectPreset('lofi')">Lo-Fi</button>
+          </div>
+        </div>
       </div>
       <div class="controls-row">
+        <button id="musicBtn" onclick="toggleMusic()">Play</button>
+        <button id="recBtn" onclick="toggleRecording()">Rec</button>
+        <button id="pauseBtn" onclick="togglePause()">Pause</button>
+        <div class="divider"></div>
         <label>Scale:</label>
         <select id="scaleSelect" onchange="updateScale()">
           <option value="pentatonic" selected>Pentatonic</option>
@@ -1061,7 +1186,7 @@
         </select>
         <div class="divider"></div>
         <label>Mode:</label>
-        <select id="seqModeSelect" onchange="SYNTH_PARAMS.seq_mode.value = this.value; scheduleSave();">
+        <select id="seqModeSelect" onchange="SYNTH_PARAMS.seq_mode.value = this.value; if(this.value !== 'drone') stopDrone(); else if(musicPlaying) startDrone(); scheduleSave();">
           <option value="drone" selected>Drone</option>
           <option value="generative">Generative</option>
           <option value="arp">Arp</option>
@@ -1075,20 +1200,47 @@
         <label>Vol:</label>
         <input type="range" id="volumeSlider" min="0" max="100" value="60" style="width:60px" oninput="updateVolume()">
         <div class="divider"></div>
-        <div class="divider"></div>
-        <label>Perc:</label>
-        <button class="perc-toggle" id="percToggleInline" onclick="togglePerc()" style="font-size:8px;padding:2px 8px">OFF</button>
-        <label>Melody:</label>
-        <button class="perc-toggle on" id="melodyToggleInline" onclick="toggleMelody()" style="font-size:8px;padding:2px 8px">ON</button>
+        <span class="perc-strip-label">Perc</span>
+        <div class="perc-strip-toggle" id="percStripToggle" onclick="togglePercStrip()" style="width:36px;height:18px"></div>
         <div class="divider"></div>
         <button class="reset-btn" onclick="resetCurrentPreset()">Reset</button>
-        <span class="patch-bay-toggle" onclick="togglePatchBay()">Patch Bay</span>
-        <span class="xy-pad-toggle" onclick="toggleXYPad()">XY Pad</span>
-        <span class="synth-toggle" onclick="document.getElementById('synthPanel').classList.toggle('open')">Synth Panel</span>
       </div>
     </div>
-    <!-- Patch Bay (modular cable routing) -->
-    <div class="patch-bay" id="patchBay">
+    <!-- Tabbed panels -->
+    <div class="panel-tabs" id="panelTabs">
+      <div class="panel-tab" data-tab="percussion" onclick="switchTab('percussion')">Percussion</div>
+      <div class="panel-tab" data-tab="patchbay" onclick="switchTab('patchbay')">Patch Bay</div>
+      <div class="panel-tab" data-tab="xypad" onclick="switchTab('xypad')">XY Pad</div>
+      <div class="panel-tab" data-tab="synth" onclick="switchTab('synth')">Synth Panel</div>
+    </div>
+    <!-- Tab: Percussion -->
+    <div class="panel-tab-content" data-tab-content="percussion" id="percSection">
+      <div class="perc-grid" id="percGrid"></div>
+      <div class="perc-controls">
+        <div class="perc-knob-group">
+          <span class="knob-label">Volume</span>
+          <input type="range" id="percVol" min="0" max="100" value="40" style="width:60px;height:3px;accent-color:#d4956a" oninput="percVolume=this.value/100; if(percGain) percGain.gain.rampTo(percVolume,0.05); scheduleSave();">
+        </div>
+        <div class="perc-knob-group">
+          <span class="knob-label">Swing</span>
+          <input type="range" id="percSwing" min="0" max="80" value="0" style="width:60px;height:3px;accent-color:#d4956a" oninput="percSwingAmt=this.value/100; scheduleSave();">
+        </div>
+        <div class="perc-knob-group">
+          <span class="knob-label">Density Source</span>
+          <select class="mod-src" style="width:auto;font-size:8px;min-width:60px" onchange="percDensitySource=this.value; scheduleSave();" id="percDensitySrc">
+            <option value="fixed">Fixed</option>
+            <option value="plant_activity" selected>Plant Activity</option>
+            <option value="plant_smooth">Plant Smooth</option>
+            <option value="ch1_activity">Clips A Activity</option>
+            <option value="max_activity">Max Activity</option>
+            <option value="ch2_activity" disabled hidden>Clips B Activity</option>
+            <option value="ch3_activity" disabled hidden>TENS Activity</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <!-- Tab: Patch Bay -->
+    <div class="panel-tab-content" data-tab-content="patchbay" id="patchBay">
       <div class="patch-bay-inner" id="patchBayInner">
         <div class="patch-col patch-col-src" id="patchSrcCol"></div>
         <div class="patch-center">
@@ -1103,8 +1255,8 @@
         <div class="patch-col patch-col-dst" id="patchDstCol"></div>
       </div>
     </div>
-    <!-- XY Morph Pad -->
-    <div class="xy-pad-section" id="xyPadSection">
+    <!-- Tab: XY Pad -->
+    <div class="panel-tab-content" data-tab-content="xypad" id="xyPadSection">
       <div class="xy-pad-layout">
         <div class="xy-pad-container">
           <div class="xy-pad" id="xyPad">
@@ -1121,31 +1273,31 @@
           <div class="xy-control-row">
             <label>X:</label>
             <select id="xySourceX" onchange="xyAxisSource.x = this.value; scheduleSave();">
-              <option value="ch1_smooth" selected>Clips A smo</option>
-              <option value="ch1_raw">Clips A raw</option>
-              <option value="ch1_activity">Clips A act</option>
-              <option value="ch2_smooth">Clips B smo</option>
-              <option value="ch2_raw">Clips B raw</option>
-              <option value="ch2_activity">Clips B act</option>
-              <option value="ch3_smooth">TENS smo</option>
-              <option value="ch3_raw">TENS raw</option>
-              <option value="ch3_activity">TENS act</option>
+              <option value="ch1_smooth" selected>Smooth</option>
+              <option value="ch1_raw">Raw</option>
+              <option value="ch1_activity">Activity</option>
               <option value="manual">Manual</option>
+              <option value="ch2_smooth" disabled hidden>Clips B smo</option>
+              <option value="ch2_raw" disabled hidden>Clips B raw</option>
+              <option value="ch2_activity" disabled hidden>Clips B act</option>
+              <option value="ch3_smooth" disabled hidden>TENS smo</option>
+              <option value="ch3_raw" disabled hidden>TENS raw</option>
+              <option value="ch3_activity" disabled hidden>TENS act</option>
             </select>
           </div>
           <div class="xy-control-row">
             <label>Y:</label>
             <select id="xySourceY" onchange="xyAxisSource.y = this.value; scheduleSave();">
-              <option value="ch2_smooth" selected>Clips B smo</option>
-              <option value="ch2_raw">Clips B raw</option>
-              <option value="ch2_activity">Clips B act</option>
-              <option value="ch1_smooth">Clips A smo</option>
-              <option value="ch1_raw">Clips A raw</option>
-              <option value="ch1_activity">Clips A act</option>
-              <option value="ch3_smooth">TENS smo</option>
-              <option value="ch3_raw">TENS raw</option>
-              <option value="ch3_activity">TENS act</option>
+              <option value="ch1_activity" selected>Activity</option>
+              <option value="ch1_smooth">Smooth</option>
+              <option value="ch1_raw">Raw</option>
               <option value="manual">Manual</option>
+              <option value="ch2_smooth" disabled hidden>Clips B smo</option>
+              <option value="ch2_raw" disabled hidden>Clips B raw</option>
+              <option value="ch2_activity" disabled hidden>Clips B act</option>
+              <option value="ch3_smooth" disabled hidden>TENS smo</option>
+              <option value="ch3_raw" disabled hidden>TENS raw</option>
+              <option value="ch3_activity" disabled hidden>TENS act</option>
             </select>
           </div>
           <div class="xy-readout">
@@ -1159,42 +1311,9 @@
         </div>
       </div>
     </div>
-    <!-- Synth knob panel (collapsed by default) -->
-    <div class="synth-panel" id="synthPanel">
+    <!-- Tab: Synth Panel -->
+    <div class="panel-tab-content" data-tab-content="synth" id="synthPanel">
       <div class="synth-sections" id="synthSections"></div>
-    </div>
-    <!-- Percussion sequencer -->
-    <div class="perc-section" id="percSection">
-      <div class="perc-header">
-        <h3>Percussion</h3>
-        <button class="perc-toggle on" id="percToggle" onclick="togglePerc()">ON</button>
-        <span class="synth-toggle" onclick="document.getElementById('percDetails').classList.toggle('open')" style="margin-left:auto">Details</span>
-      </div>
-      <div id="percDetails">
-      <div class="perc-grid" id="percGrid"></div>
-      <div class="perc-controls">
-        <div class="perc-knob-group">
-          <span class="knob-label">Volume</span>
-          <input type="range" id="percVol" min="0" max="100" value="40" style="width:60px;height:3px;accent-color:#d4956a" oninput="percVolume=this.value/100; if(percGain) percGain.gain.rampTo(percVolume,0.05); scheduleSave();">
-        </div>
-        <div class="perc-knob-group">
-          <span class="knob-label">Swing</span>
-          <input type="range" id="percSwing" min="0" max="80" value="0" style="width:60px;height:3px;accent-color:#d4956a" oninput="percSwingAmt=this.value/100; scheduleSave();">
-        </div>
-        <div class="mod-row" style="max-width:none">
-          <span class="knob-label" style="margin-right:4px">Density</span>
-          <select class="mod-src" style="width:auto;font-size:8px" onchange="percDensitySource=this.value; scheduleSave();" id="percDensitySrc">
-            <option value="fixed">--</option>
-            <option value="plant_activity" selected>P:act</option>
-            <option value="plant_smooth">P:smo</option>
-            <option value="ch1_activity">1:act</option>
-            <option value="ch2_activity">2:act</option>
-            <option value="ch3_activity">3:act</option>
-            <option value="max_activity">MaxAct</option>
-          </select>
-        </div>
-      </div>
-      </div>
     </div>
     <!-- Melody settings controlled by presets, toggle in controls row -->
     <!-- Now playing strip -->
@@ -1202,11 +1321,6 @@
       <span class="now-playing-chord" id="nowChord">--</span>
       <div class="now-playing-bar"><div class="now-playing-fill" id="seqBar"></div></div>
       <span class="now-playing-activity" id="nowActivity">0%</span>
-    </div>
-    <div class="music-playback">
-      <button id="musicBtn" onclick="toggleMusic()">Play</button>
-      <button id="recBtn" onclick="toggleRecording()">Rec</button>
-      <button id="pauseBtn" onclick="togglePause()">Pause</button>
     </div>
   </div>
 
@@ -1552,6 +1666,130 @@
 
     const clamp01 = v => Math.max(0, Math.min(1, v));
 
+    // --- Macro Modulation System ---
+    // Macros move multiple params together in musically coherent gestures.
+    // Unlike per-param modRouting (additive offsets), macros set ABSOLUTE target ranges.
+    const MACRO_DEFS = {
+      brightness: {
+        // Dark ↔ Bright: DJ-style filter sweep + inverse reverb
+        params: {
+          filter_cutoff: { min: 150, max: 16000, curve: 'exp' },
+          filter_res:    { min: 3, max: 0.3, curve: 'lin' },     // inverse — resonant when dark
+          rev_wet:       { min: 0.7, max: 0.15, curve: 'lin' },  // inverse — wet when dark
+          dist_amt:      { min: 0, max: 0.15, curve: 'lin' },    // slight grit when bright
+        }
+      },
+      energy: {
+        // Calm ↔ Intense: volume, density, drive — ceilings kept musical
+        params: {
+          amp_level:   { min: 0.3, max: 0.55, curve: 'lin' },
+          osc2_level:  { min: 0.1, max: 0.4, curve: 'lin' },
+          dist_amt:    { min: 0, max: 0.12, curve: 'lin' },
+          dly_wet:     { min: 0.05, max: 0.3, curve: 'lin' },
+          seq_prob:    { min: 0.15, max: 0.55, curve: 'lin' },
+        }
+      },
+      space: {
+        // Dry/Close ↔ Vast/Wet: reverb, delay, chorus — gentle darkening
+        params: {
+          rev_wet:       { min: 0.1, max: 0.65, curve: 'lin' },
+          dly_fb:        { min: 0.05, max: 0.4, curve: 'lin' },
+          dly_wet:       { min: 0.05, max: 0.35, curve: 'lin' },
+          chr_wet:       { min: 0, max: 0.4, curve: 'lin' },
+          filter_cutoff: { min: 6000, max: 2500, curve: 'exp' },  // subtle darkening
+        }
+      },
+      tension: {
+        // Resolved ↔ Tense: filter closes, resonance builds, dissonance
+        params: {
+          filter_cutoff: { min: 4000, max: 200, curve: 'exp' },   // filter closes
+          filter_res:    { min: 0.5, max: 12, curve: 'lin' },     // resonance screams
+          osc2_detune:   { min: 0, max: 50, curve: 'lin' },       // dissonance builds
+          dly_fb:        { min: 0.1, max: 0.65, curve: 'lin' },   // echo builds to feedback
+        }
+      },
+    };
+
+    // Active macro assignments per preset — set by loadFactoryPreset
+    let activeMacros = {}; // e.g. { brightness: 'plant_smooth', energy: 'plant_activity' }
+
+    function applyMacros() {
+      if (!Object.keys(activeMacros).length) return;
+
+      for (const [macroName, source] of Object.entries(activeMacros)) {
+        const macro = MACRO_DEFS[macroName];
+        if (!macro || !source || source === 'fixed') continue;
+
+        const mod = Math.max(0, Math.min(1, resolveModSource(source)));
+
+        for (const [paramName, range] of Object.entries(macro.params)) {
+          const p = SYNTH_PARAMS[paramName];
+          if (!p) continue;
+
+          let val;
+          if (range.curve === 'exp') {
+            // Exponential interpolation (for frequency params)
+            const logMin = Math.log(Math.max(0.01, range.min));
+            const logMax = Math.log(Math.max(0.01, range.max));
+            val = Math.exp(logMin + mod * (logMax - logMin));
+          } else {
+            // Linear interpolation
+            val = range.min + mod * (range.max - range.min);
+          }
+
+          // Clamp to param's valid range
+          val = Math.max(p.min, Math.min(p.max, val));
+          if (p.type === 'int') val = Math.round(val);
+          p.value = val;
+        }
+      }
+    }
+
+    // --- Arrangement Engine ---
+    // Controls which musical layers are active based on smoothed plant activity.
+    // Transitions use gain fades, not instant switches.
+    let arrangementState = 'gentle';
+    let arrangementSmoothed = 5; // smoothed activity for arrangement (slower than perc)
+
+    function getArrangementState(activity) {
+      if (activity < 3) return 'whisper';
+      if (activity < 8) return 'gentle';
+      if (activity < 18) return 'flowing';
+      if (activity < 35) return 'grooving';
+      return 'soaring';
+    }
+
+    // Arrangement layer targets per state
+    const ARRANGEMENT_LAYERS = {
+      whisper:  { masterVol: 0.35, osc2Vol: 0.05, melodyActive: false, percActive: false, chordSize: 1 },
+      gentle:   { masterVol: 0.45, osc2Vol: 0.15, melodyActive: false, percActive: false, chordSize: 2 },
+      flowing:  { masterVol: 0.55, osc2Vol: 0.3,  melodyActive: true,  percActive: false, chordSize: 3 },
+      grooving: { masterVol: 0.6,  osc2Vol: 0.45, melodyActive: true,  percActive: true,  chordSize: 3 },
+      soaring:  { masterVol: 0.7,  osc2Vol: 0.6,  melodyActive: true,  percActive: true,  chordSize: 4 },
+    };
+
+    function updateArrangement() {
+      // Slow follow — arrangement changes over seconds, not milliseconds
+      arrangementSmoothed += (currentActivity - arrangementSmoothed) * 0.02;
+      const newState = getArrangementState(arrangementSmoothed);
+
+      if (newState !== arrangementState) {
+        arrangementState = newState;
+        const layers = ARRANGEMENT_LAYERS[arrangementState];
+        // Ramp gains over 1.5 seconds for smooth transitions
+        if (masterGain) masterGain.gain.rampTo(layers.masterVol, 1.5);
+        if (osc2Gain) osc2Gain.gain.rampTo(layers.osc2Vol, 1.5);
+        // Percussion: auto-enable/disable based on arrangement (if preset allows)
+        // Only auto-enable if the preset's _perc flag is true or user toggled it on
+        // Percussion: if user toggled it on, always audible (min 50% volume)
+        // Arrangement only controls the ceiling, not silence
+        if (percGain && percEnabled) {
+          const percTarget = layers.percActive ? percVolume : percVolume * 0.5;
+          percGain.gain.rampTo(percTarget, 1.0);
+        }
+      }
+    }
+
     // --- Audio Graph (persistent, no disposal on preset change) ---
     let masterGain = null;
     let osc1Synth = null, osc2Synth = null;
@@ -1561,6 +1799,7 @@
     let analyserNode = null;
     // Stereo enhancement
     let stereoWidener = null, lowShelf = null, subBassSynth = null, subBassGain = null;
+    let vinylNoise = null, vinylGain = null;
     // Dynamic panning
     let synthPanner = null; // pans the main synth output
 
@@ -1571,26 +1810,41 @@
       // Master limiter — prevents clipping on any output
       const limiter = new Tone.Limiter(-3).connect(dest);
 
-      // Compressor — evens out dynamics
-      const compressor = new Tone.Compressor({ threshold: -18, ratio: 4, attack: 0.01, release: 0.15 }).connect(limiter);
+      // Compressor — tighter compression to keep cumulative level controlled
+      const compressor = new Tone.Compressor({ threshold: -24, ratio: 6, attack: 0.003, release: 0.12, knee: 6 }).connect(limiter);
 
-      // Low shelf EQ — adds warmth below 200Hz (+4dB, reduced from 6 to prevent mud)
-      lowShelf = new Tone.EQ3({ low: 4, mid: 0, high: 0, lowFrequency: 200, highFrequency: 4000 }).connect(compressor);
+      // Low shelf EQ — adds warmth below 200Hz
+      lowShelf = new Tone.EQ3({ low: 3, mid: 0, high: 0, lowFrequency: 200, highFrequency: 4000 }).connect(compressor);
 
       // Stereo widener — chorus with very short delay creates spatial width
       stereoWidener = new Tone.Chorus({
         frequency: 0.4, delayTime: 8, depth: 0.4, wet: 0.3, spread: 180
       }).connect(lowShelf).start();
 
-      masterGain = new Tone.Gain(0.5).connect(stereoWidener);
+      masterGain = new Tone.Gain(0.4).connect(stereoWidener);
 
       // Sub-bass synth — follows bass notes an octave below, pure sine
-      subBassGain = new Tone.Gain(0.18).connect(limiter); // through limiter, lower gain to prevent mud
+      subBassGain = new Tone.Gain(0.25).connect(limiter); // sub-bass through limiter
       subBassSynth = new Tone.MonoSynth({
         oscillator: { type: 'sine' },
-        envelope: { attack: 0.01, decay: 0.4, sustain: 0.3, release: 0.3 },
-        filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 1, release: 0.3, baseFrequency: 30, octaves: 1 },
+        envelope: { attack: 0.05, decay: 0.5, sustain: 0.7, release: 1.0 },
+        filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 1, release: 0.5, baseFrequency: 30, octaves: 1.5 },
       }).connect(subBassGain);
+
+      // Vinyl crackle — real sample, looped
+      // Routes DIRECTLY to limiter, bypassing compressor/masterGain
+      // so it doesn't get sidechained by kick or crushed by the main mix compression
+      vinylGain = new Tone.Gain(0).connect(limiter);
+      vinylNoise = new Tone.Player({
+        url: '/static/vinyl-crackle.mp3',
+        loop: true,
+        autostart: false,
+        onload: () => {
+          console.log('[PlantPulse] Vinyl sample loaded, starting playback');
+          vinylNoise.start();
+        },
+      }).connect(vinylGain);
+      vinylNoise.volume.value = 0;
 
       analyserNode = new Tone.Analyser('waveform', 256);
       masterGain.connect(analyserNode);
@@ -1633,7 +1887,9 @@
 
     function applySynthParams() {
       if (!osc1Synth) return;
-      const R = 0.05; // ramp time to avoid clicks
+      const RF = 0.01;  // filter ramp — crisp, DJ-like
+      const RG = 0.05;  // gain ramp — smooth
+      const RS = 0.15;  // spatial ramp — no zipper noise on reverb/delay
 
       // Oscillators
       osc1Synth.set({ oscillator: { type: SYNTH_PARAMS.osc1_wave.value, spread: SYNTH_PARAMS.osc1_spread.value }, detune: getModValue('osc1_detune') });
@@ -1644,29 +1900,29 @@
       osc1Synth.set({ envelope: env });
       osc2Synth.set({ envelope: env });
 
-      // Gains + Filter — clamp everything, catch any Tone.js range errors
+      // Gains + Filter
       try {
-        osc1Gain.gain.rampTo(clamp01(getModValue('osc1_level')), R);
-        osc2Gain.gain.rampTo(clamp01(getModValue('osc2_level')), R);
-        masterGain.gain.rampTo(clamp01(getModValue('amp_level')), R);
+        osc1Gain.gain.rampTo(clamp01(getModValue('osc1_level')), RG);
+        osc2Gain.gain.rampTo(clamp01(getModValue('osc2_level')), RG);
+        masterGain.gain.rampTo(clamp01(getModValue('amp_level')), RG);
         filterNode.type = SYNTH_PARAMS.filter_type.value;
-        filterNode.frequency.rampTo(Math.max(20, Math.min(20000, getModValue('filter_cutoff'))), R);
-        filterNode.Q.rampTo(Math.max(0.1, Math.min(20, getModValue('filter_res'))), R);
+        filterNode.frequency.rampTo(Math.max(20, Math.min(20000, getModValue('filter_cutoff'))), RF);
+        filterNode.Q.rampTo(Math.max(0.1, Math.min(20, getModValue('filter_res'))), RF);
       } catch(e) {}
 
-      // Effects — clamp ALL Tone.js Signal params to valid ranges
+      // Effects — spatial params use longer ramp
       try {
-        reverbNode.wet.rampTo(clamp01(getModValue('rev_wet')), R);
-        delayNode.delayTime.rampTo(Math.max(0.01, Math.min(1, SYNTH_PARAMS.dly_time.value)), 0.1);
-        delayNode.feedback.rampTo(clamp01(getModValue('dly_fb')), R);
-        delayNode.wet.rampTo(clamp01(getModValue('dly_wet')), R);
-        chorusNode.frequency.rampTo(Math.max(0.1, getModValue('chr_rate')), R);
-        chorusNode.wet.rampTo(clamp01(getModValue('chr_wet')), R);
+        reverbNode.wet.rampTo(clamp01(getModValue('rev_wet')), RS);
+        delayNode.delayTime.rampTo(Math.max(0.01, Math.min(1, SYNTH_PARAMS.dly_time.value)), RS);
+        delayNode.feedback.rampTo(clamp01(getModValue('dly_fb')), RS);
+        delayNode.wet.rampTo(clamp01(getModValue('dly_wet')), RS);
+        chorusNode.frequency.rampTo(Math.max(0.1, getModValue('chr_rate')), RS);
+        chorusNode.wet.rampTo(clamp01(getModValue('chr_wet')), RS);
         distNode.distortion = clamp01(getModValue('dist_amt'));
-        distNode.wet.rampTo(clamp01(getModValue('dist_wet')), R);
+        distNode.wet.rampTo(clamp01(getModValue('dist_wet')), RG);
         // Pan
-        if (synthPanner) synthPanner.pan.rampTo(Math.max(-1, Math.min(1, getModValue('pan'))), R);
-      } catch(e) {} // suppress range errors from modulation overshoots
+        if (synthPanner) synthPanner.pan.rampTo(Math.max(-1, Math.min(1, getModValue('pan'))), RG);
+      } catch(e) {}
 
       // Update knob visuals if modulated
       updateModulatedKnobs();
@@ -1805,10 +2061,12 @@
           else if (_noteLogSrc === 'gen-bass' || _noteLogSrc === 'bass') offset = -basePan * 0.8; // pull bass toward center
           synthPanner.pan.rampTo(Math.max(-1, Math.min(1, basePan + offset)), 0.05);
         }
+        // Humanize note velocity slightly — ±8% random variation for organic feel
+        const humanVel = velocity * (0.92 + Math.random() * 0.16);
         const osc2Note = Tone.Frequency(note).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
-        osc1Synth.triggerAttackRelease(note, duration, undefined, velocity);
+        osc1Synth.triggerAttackRelease(note, duration, undefined, humanVel * 0.7);
         if (SYNTH_PARAMS.osc2_level.value > 0) {
-          osc2Synth.triggerAttackRelease(osc2Note, duration, undefined, velocity);
+          osc2Synth.triggerAttackRelease(osc2Note, duration, undefined, humanVel * 0.4);
         }
         triggerFilterEnvelope();
       }
@@ -1828,36 +2086,104 @@
     let droneNotes = [];
     let lastDroneUpdate = 0;
 
+    function buildChord(rootNote, rootIdx) {
+      const notes = currentNotes;
+      const n = notes.length;
+      const act = currentActivity;
+      const safeNote = (i) => notes[Math.max(0, Math.min(n - 1, i))];
+      const maxSize = (ARRANGEMENT_LAYERS[arrangementState] || {}).chordSize || 3;
+
+      // Build chord based on arrangement state size
+      const chord = [rootNote];
+      if (maxSize >= 2 && rootIdx >= 0 && rootIdx + 4 < n) chord.push(safeNote(rootIdx + 4)); // 5th
+      if (maxSize >= 3 && rootIdx >= 0 && rootIdx + 2 < n) chord.splice(1, 0, safeNote(rootIdx + 2)); // 3rd (insert before 5th)
+
+      // Activity-driven extensions
+      if (act > 8 && rootIdx + 6 < n) {
+        // Add 7th — creates maj7/min7 depending on scale
+        chord.push(safeNote(rootIdx + 6));
+      }
+
+      if (act > 20 && rootIdx + 1 < n && Math.random() < 0.3) {
+        // Occasionally replace 3rd with sus4 (scale degree 3 instead of 2)
+        // then resolve next chord change — creates tension/release
+        chord[1] = safeNote(rootIdx + 3);
+      }
+
+      if (act > 30 && rootIdx + 8 < n) {
+        // Add 9th for lush extended voicing
+        chord.push(safeNote(rootIdx + 8));
+      }
+
+      // Inversions based on signal position — lower signal = lower inversion
+      const signalNorm = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1)));
+      if (signalNorm < 0.3 && chord.length >= 3) {
+        // First inversion — move root up an octave
+        const raised = Tone.Frequency(chord[0]).transpose(12).toNote();
+        chord.shift();
+        chord.push(raised);
+      } else if (signalNorm > 0.7 && chord.length >= 3) {
+        // Second inversion — move root and 3rd up
+        const raised0 = Tone.Frequency(chord[0]).transpose(12).toNote();
+        const raised1 = Tone.Frequency(chord[1]).transpose(12).toNote();
+        chord.shift(); chord.shift();
+        chord.push(raised0, raised1);
+      }
+
+      return chord;
+    }
+
     function updateDrone() {
       if (!osc1Synth || SYNTH_PARAMS.seq_mode.value !== 'drone') return;
       // Quantize chord changes to percussion bar boundaries when perc is on
       if (percEnabled) {
-        if (!percBarStart) return; // only update on bar start (step 0)
+        if (!percBarStart) return;
       } else {
         const now = Date.now();
-        if (now - lastDroneUpdate < 2000) return;
+        // Chord change rate driven by slow-averaged plant activity
+        // Quiet plant = change every 12s, active = every 3s
+        const chordCooldown = Math.max(3000, 12000 - arrangementSmoothed * 250);
+        if (now - lastDroneUpdate < chordCooldown) return;
         lastDroneUpdate = now;
       }
 
       const note = mapSignalToNote(currentSmoothed, -1);
       const idx = currentNotes.indexOf(note);
-      const newChord = [note];
-      if (idx >= 0 && idx + 2 < currentNotes.length) newChord.push(currentNotes[idx + 2]);
-      if (idx >= 0 && idx + 4 < currentNotes.length) newChord.push(currentNotes[idx + 4]);
+      const newChord = buildChord(note, idx);
 
       const chordStr = newChord.join(',');
       if (chordStr !== droneNotes.join(',')) {
-        // Release old notes, attack new ones (with long envelope, sounds smooth)
+        // Release old notes, play new ones
         osc1Synth.releaseAll();
         osc2Synth.releaseAll();
-        newChord.forEach(n => {
+        // If sustain is very low (piano-like), use triggerAttackRelease so notes decay naturally
+        // Otherwise use triggerAttack for sustained drones
+        const useNaturalDecay = SYNTH_PARAMS.amp_s.value < 0.1;
+        const droneDuration = useNaturalDecay ? '2n' : undefined;
+        newChord.forEach((n, chordIdx) => {
           const mode = SYNTH_PARAMS.midi_mode.value;
+          // Humanize velocity per chord note — ±10% variation
+          const humanV = 0.92 + Math.random() * 0.16;
+          // Tiny micro-timing offset — each note slightly delayed (0-15ms "rolled" chord feel)
+          const microDelay = chordIdx * (Math.random() * 0.008) * 1000;
           if (mode === 'audio' || mode === 'both') {
-            osc1Synth.triggerAttack(n, undefined, 0.3);
-            if (SYNTH_PARAMS.osc2_level.value > 0) {
-              const n2 = Tone.Frequency(n).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
-              osc2Synth.triggerAttack(n2, undefined, 0.3);
-            }
+            const fire = () => {
+              if (useNaturalDecay) {
+                osc1Synth.triggerAttackRelease(n, droneDuration, undefined, 0.35 * humanV);
+                if (SYNTH_PARAMS.osc2_level.value > 0) {
+                  const n2 = Tone.Frequency(n).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
+                  osc2Synth.triggerAttackRelease(n2, droneDuration, undefined, 0.2 * humanV);
+                }
+              } else {
+                osc1Synth.triggerAttack(n, undefined, 0.3 * humanV);
+                if (SYNTH_PARAMS.osc2_level.value > 0) {
+                  const n2 = Tone.Frequency(n).transpose(SYNTH_PARAMS.osc2_octave.value * 12).toNote();
+                  osc2Synth.triggerAttack(n2, undefined, 0.3 * humanV);
+                }
+              }
+            };
+            if (microDelay > 0) setTimeout(fire, microDelay);
+            else fire();
           }
           if ((mode === 'midi' || mode === 'both') && midiOutput) midiNoteOn(n, 0.3);
         });
@@ -1910,58 +2236,94 @@
       const beatMs = getSeqBeatMs();
 
       if (mode === 'generative') {
-        // Step clock always runs (even without perc audio)
-        const velocity = 0.15 + Math.min(currentActivity / 25, 0.7);
+        const velocity = 0.1 + Math.min(currentActivity / 50, 0.35);
         const step = percStep;
 
-        // === hybrid3 layout: bass on 0,6 — arp on 2,3,8,10,11,14 — gen-mel fills rest ===
+        // Per-preset generative layouts — different rhythmic skeletons
+        const GEN_LAYOUTS = {
+          // Default/Bells: even spread, balanced bass-arp-melody
+          default:    { bass:[0, 6],  arp:[2,3,8,10,11,14], arpProb:0.35, melProb:0.32 },
+          bells:      { bass:[0, 8],  arp:[2,4,10,14],      arpProb:0.4,  melProb:0.25 },
+          // Organic: swung, bass walks more, melody fills heavily
+          organic:    { bass:[0, 5],  arp:[3,7,11,15],      arpProb:0.25, melProb:0.45 },
+          // Synth Wave: driving, steady bass, arps on off-beats
+          synthwave:  { bass:[0, 4, 8, 12], arp:[2,6,10,14], arpProb:0.45, melProb:0.2 },
+          // Piano: sparse bass, lots of melody space, lyrical
+          piano:      { bass:[0, 8],  arp:[4, 12],          arpProb:0.2,  melProb:0.5 },
+          // Lo-Fi: laid-back, bass on 1 and 9, arp sparse, melody chill
+          lofi:       { bass:[0, 8],  arp:[3,5,11,13],      arpProb:0.3,  melProb:0.35 },
+          // Circuit: chiptune — busy bass, lots of arps, melody bursts
+          circuit:    { bass:[0, 4, 8, 12], arp:[1,3,5,7,9,11,13,15], arpProb:0.5, melProb:0.3 },
+        };
+        const layout = GEN_LAYOUTS[currentPresetName] || GEN_LAYOUTS.default;
+        const allAssigned = new Set([...layout.bass, ...layout.arp]);
+        const melSteps = [];
+        for (let i = 0; i < 16; i++) { if (!allAssigned.has(i)) melSteps.push(i); }
 
-        // Bass: steps 0 and 6 (avoids landing on 8 with kick)
-        if (percOnStep && (step === 0 || step === 6)) {
-          const signalNorm = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1)));
-          const rootIdx = Math.floor(signalNorm * (currentNotes.length * 0.4));
-          const bassBase = Math.max(0, rootIdx - Math.floor(currentNotes.length / 4));
-          // Walk: wide range, low root bias (8% chance of staying on root)
+        // Plant-driven step shifting: activity can move bass/arp hits by ±1 step
+        // and skip steps entirely when plant is very quiet
+        const actNorm = Math.min(1, currentActivity / 40);
+        // At low activity, probability of playing any non-bass step drops
+        const playChance = 0.4 + actNorm * 0.6; // 40% at zero activity, 100% at 40%+
+
+        // Bass — always plays (foundation) but can shift timing with activity
+        const bassShift = (currentActivity > 20 && Math.random() < 0.15) ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        const shiftedBass = layout.bass.map(s => ((s + bassShift) + 16) % 16);
+        if (percOnStep && shiftedBass.includes(step)) {
+          // Lock bass root to lowest octave of note pool
+          const _notesPerOct = Math.max(1, Math.floor(currentNotes.length / 4));
           let walkIdx = 0;
-          if (Math.random() > 0.08) {
-            const offsets = [-3, -2, -1, 1, 2, 3, 4, 5];
-            const direction = currentRawValue > currentSmoothed ? 1 : -1;
-            walkIdx = offsets[Math.floor(Math.random() * offsets.length)] + direction;
+          if (Math.random() > 0.3) {
+            const offsets = [0, 1, 2, 3]; // scale degrees within first octave
+            walkIdx = offsets[Math.floor(Math.random() * offsets.length)];
           }
-          const noteIdx = Math.max(0, Math.min(currentNotes.length - 1, bassBase + walkIdx));
-          _noteLogSrc = 'gen-bass'; triggerNote(currentNotes[noteIdx], gate * 2, velocity * 0.5);
-          // Bass chord: add third and fifth when voice mode is poly
-          if (SYNTH_PARAMS.seq_voice.value === 'poly') {
+          const noteIdx = Math.min(_notesPerOct - 1, walkIdx);
+          // Transpose down an octave so gen-bass plays in octave 2
+          let bassNoteLow = currentNotes[noteIdx];
+          try { bassNoteLow = Tone.Frequency(bassNoteLow).transpose(-12).toNote(); } catch(_) {}
+          _noteLogSrc = 'gen-bass';
+          // Trigger the root in low octave, then optionally chord tones in proper octave
+          triggerNote(bassNoteLow, gate * 2, velocity * 0.35);
+          const _melPlaying = melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length;
+          if (SYNTH_PARAMS.seq_voice.value === 'poly' && !_melPlaying) {
+            // Third and fifth at normal octave (not transposed down) — spread chord
             const thirdIdx = Math.min(currentNotes.length - 1, noteIdx + 2);
             const fifthIdx = Math.min(currentNotes.length - 1, noteIdx + 4);
-            triggerNote(currentNotes[thirdIdx], gate * 2, velocity * 0.35);
-            triggerNote(currentNotes[fifthIdx], gate * 2, velocity * 0.3);
+            triggerNote(currentNotes[thirdIdx], gate * 2, velocity * 0.25);
+            triggerNote(currentNotes[fifthIdx], gate * 2, velocity * 0.2);
           }
-          // Sub-bass reinforcement
-          if (subBassSynth) { try { subBassSynth.triggerAttackRelease(Tone.Frequency(currentNotes[noteIdx]).transpose(-12).toNote(), gate * 2, undefined, velocity * 0.3); } catch(_){} }
+          if (subBassSynth) { try { subBassSynth.triggerAttackRelease(Tone.Frequency(bassNoteLow).transpose(-12).toNote(), gate * 2, undefined, velocity * 0.3); } catch(_){} }
         }
 
-        // Arp: steps 2,3,8,10,11,14 — mix of even and odd
-        if (percOnStep && [2, 3, 8, 10, 11, 14].includes(step)) {
-          const isEven = step % 2 === 0;
-          const arpProb = isEven ? 0.35 : 0.3;
-          if (Math.random() < arpProb) {
-            const baseIdx = Math.floor(Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1))) * (currentNotes.length * 0.6));
+        // Clamp gen melody/arp to 2nd octave of pool — middle register only
+        const _genNotesPerOct = Math.max(1, Math.floor(currentNotes.length / 4));
+        const _genRangeStart = _genNotesPerOct;
+        const _genRangeEnd = Math.floor(_genNotesPerOct * 2) - 1;
+        const _genRangeSize = Math.max(1, _genRangeEnd - _genRangeStart);
+
+        // Arp — gated by plant activity, quieter when melody phrase is playing
+        const _arpMelGate = (melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length) ? 0.5 : 1;
+        if (percOnStep && layout.arp.includes(step) && Math.random() < playChance * _arpMelGate) {
+          if (Math.random() < (layout.arpProb + actNorm * 0.15) * _arpMelGate) {
+            const sigN = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
+            const baseIdx = _genRangeStart + Math.floor(sigN * _genRangeSize * 0.5);
             const intervals = [0, 1, 2, 3, 4, 5];
             const toneIdx = intervals[arpIndex % intervals.length];
-            const note = currentNotes[Math.min(baseIdx + toneIdx, currentNotes.length - 1)];
-            _noteLogSrc = 'gen-arp'; triggerNote(note, gate * 0.4, velocity * 0.4);
+            const noteIdx = Math.min(_genRangeEnd, baseIdx + toneIdx);
+            _noteLogSrc = 'gen-arp'; triggerNote(currentNotes[noteIdx], gate * 0.4, velocity * 0.3);
             arpIndex++;
           }
         }
 
-        // Generative melody: steps 1,4,5,7,9,12,13,15 — fills all remaining gaps
-        if (percOnStep && [1, 4, 5, 7, 9, 12, 13, 15].includes(step)) {
-          if (Math.random() < 0.32) {
-            const jitter = Math.floor((Math.random() - 0.5) * 4);
-            const idx = Math.floor(Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1))) * currentNotes.length * 0.6);
-            const noteIdx = Math.max(0, Math.min(currentNotes.length - 1, idx + jitter + Math.floor(melodyOctave * currentNotes.length / 4)));
-            _noteLogSrc = 'gen-mel'; triggerNote(currentNotes[noteIdx], gate * 0.5, velocity * 0.6);
+        // Generative melody — backs off when dedicated melody system is playing a phrase
+        const melodyPlaying = melodyEnabled && melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length;
+        if (!melodyPlaying && percOnStep && melSteps.includes(step) && Math.random() < playChance) {
+          if (Math.random() < layout.melProb + actNorm * 0.1) {
+            const jitter = Math.floor((Math.random() - 0.5) * 2);
+            const sigN = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
+            const idx = _genRangeStart + Math.floor(sigN * _genRangeSize);
+            const noteIdx = Math.max(_genRangeStart, Math.min(_genRangeEnd, idx + jitter));
+            _noteLogSrc = 'gen-mel'; triggerNote(currentNotes[noteIdx], gate * 0.5, velocity * 0.4);
           }
         }
         return;
@@ -1969,15 +2331,29 @@
 
       // Arp mode — plays on even steps, skips some based on probability
       if (mode === 'arp') {
-        if (!percOnStep || percStep % 2 !== 0) return;
+        const actNorm = Math.min(1, currentActivity / 40);
+        const stepOk = percStep % 2 === 0 || (actNorm > 0.5 && percStep % 2 === 1 && Math.random() < actNorm);
+        if (!percOnStep || !stepOk) return;
         if (Math.random() > prob) return;
         lastSeqTime = now;
-        const baseIdx = Math.floor(Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1))) * (currentNotes.length * 0.6));
-        // Wider chord: root, 2nd, 3rd, 5th, 6th — more note variety
-        const intervals = [0, 1, 2, 4, 5];
-        const tones = intervals.map(o => currentNotes[Math.min(baseIdx + o, currentNotes.length - 1)]);
-        const velocity = 0.15 + Math.min(currentActivity / 25, 0.7);
-        _noteLogSrc = 'seq-arp'; triggerNote(tones[arpIndex % tones.length], gate, velocity);
+        // Base slides slowly with smoothed signal but stays in lower half
+        const signalNorm = Math.max(0, Math.min(1, (currentSmoothed - signalMin) / (signalMax - signalMin || 1)));
+        const baseIdx = Math.floor(currentNotes.length * (0.2 + signalNorm * 0.3));
+        // Rotating interval sets — changes every 4 notes for variation
+        const intervalSets = [
+          [0, 2, 4, 5, 7],    // root, 3rd, 5th, 6th, octave
+          [0, 3, 5, 7, 10],   // minor feel
+          [0, 2, 4, 7, 9],    // pentatonic climb
+          [7, 5, 4, 2, 0],    // descending
+        ];
+        const setIdx = Math.floor(arpIndex / 5) % intervalSets.length;
+        const intervals = intervalSets[setIdx];
+        const toneIdx = arpIndex % intervals.length;
+        // Occasionally jump an octave for variation
+        const octJump = Math.random() < 0.1 ? (currentNotes.length / 4) : 0;
+        const noteIdx = Math.min(currentNotes.length - 1, Math.max(0, baseIdx + intervals[toneIdx] + Math.floor(octJump)));
+        const velocity = 0.1 + actNorm * 0.35;
+        _noteLogSrc = 'seq-arp'; triggerNote(currentNotes[noteIdx], gate, velocity);
         arpIndex++;
         return;
       }
@@ -2034,19 +2410,20 @@
     // stepProb: chance of stepwise motion, skipProb: thirds, leapProb: 4ths/5ths, repeatProb: same note
     // minLen/maxLen: phrase length range, gateBase: note length, velCurve: how velocity fades
     const MELODY_STYLES = {
-      default:    { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:5, gateBase:0.25, velStart:0.5, velFade:0.08 },
-      bells:      { stepProb:0.15, skipProb:0.2, leapProb:0.45, repeatProb:0.1, minLen:2, maxLen:3, gateBase:0.15, velStart:0.6, velFade:0.12 },     // sparkling leaps
-      pad:        { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:4, gateBase:0.5, velStart:0.35, velFade:0.03 },      // slow, gentle
-      pluck:      { stepProb:0.6, skipProb:0.2, leapProb:0.05, repeatProb:0.05, minLen:4, maxLen:6, gateBase:0.1, velStart:0.55, velFade:0.05 },      // fast scalar runs
-      wind:       { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:4, gateBase:0.4, velStart:0.35, velFade:0.04 },      // floating
-      glass:      { stepProb:0.1, skipProb:0.1, leapProb:0.3, repeatProb:0.4, minLen:1, maxLen:2, gateBase:0.5, velStart:0.5, velFade:0.0 },          // sparse single drips
-      ethereal:   { stepProb:0.2, skipProb:0.15, leapProb:0.35, repeatProb:0.15, minLen:3, maxLen:5, gateBase:0.6, velStart:0.4, velFade:0.04 },      // floating wide leaps
-      organic:    { stepProb:0.55, skipProb:0.2, leapProb:0.05, repeatProb:0.1, minLen:3, maxLen:5, gateBase:0.3, velStart:0.55, velFade:0.06 },      // bluesy stepwise
-      synthwave:  { stepProb:0.3, skipProb:0.35, leapProb:0.1, repeatProb:0.15, minLen:3, maxLen:4, gateBase:0.2, velStart:0.55, velFade:0.06 },      // catchy, lots of 3rds
-      crystalcave:{ stepProb:0.1, skipProb:0.1, leapProb:0.2, repeatProb:0.5, minLen:1, maxLen:2, gateBase:0.4, velStart:0.45, velFade:0.0 },         // single drips
-      midnight:   { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:3, gateBase:0.5, velStart:0.3, velFade:0.05 },       // sparse, quiet
-      circuit:    { stepProb:0.15, skipProb:0.15, leapProb:0.5, repeatProb:0.1, minLen:4, maxLen:6, gateBase:0.06, velStart:0.6, velFade:0.04 },      // rapid arpeggiated bursts
-      piano:      { stepProb:0.4, skipProb:0.3, leapProb:0.1, repeatProb:0.1, minLen:3, maxLen:5, gateBase:0.4, velStart:0.55, velFade:0.06 },        // lyrical, singable
+      default:    { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:5, gateBase:0.25, velStart:0.4, velFade:0.06 },
+      bells:      { stepProb:0.15, skipProb:0.2, leapProb:0.45, repeatProb:0.1, minLen:2, maxLen:3, gateBase:0.15, velStart:0.42, velFade:0.1 },      // sparkling leaps
+      pad:        { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:4, gateBase:0.5, velStart:0.3, velFade:0.03 },       // slow, gentle
+      pluck:      { stepProb:0.6, skipProb:0.2, leapProb:0.05, repeatProb:0.05, minLen:4, maxLen:6, gateBase:0.1, velStart:0.4, velFade:0.04 },       // fast scalar runs
+      wind:       { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:4, gateBase:0.4, velStart:0.3, velFade:0.03 },       // floating
+      glass:      { stepProb:0.1, skipProb:0.1, leapProb:0.3, repeatProb:0.4, minLen:1, maxLen:2, gateBase:0.5, velStart:0.4, velFade:0.0 },          // sparse single drips
+      ethereal:   { stepProb:0.2, skipProb:0.15, leapProb:0.35, repeatProb:0.15, minLen:3, maxLen:5, gateBase:0.6, velStart:0.35, velFade:0.04 },     // floating wide leaps
+      organic:    { stepProb:0.55, skipProb:0.2, leapProb:0.05, repeatProb:0.1, minLen:3, maxLen:5, gateBase:0.3, velStart:0.4, velFade:0.05 },       // bluesy stepwise
+      synthwave:  { stepProb:0.3, skipProb:0.35, leapProb:0.1, repeatProb:0.15, minLen:3, maxLen:4, gateBase:0.2, velStart:0.4, velFade:0.05 },       // catchy, lots of 3rds
+      crystalcave:{ stepProb:0.1, skipProb:0.1, leapProb:0.2, repeatProb:0.5, minLen:1, maxLen:2, gateBase:0.4, velStart:0.38, velFade:0.0 },         // single drips
+      midnight:   { stepProb:0.4, skipProb:0.25, leapProb:0.15, repeatProb:0.1, minLen:2, maxLen:3, gateBase:0.5, velStart:0.25, velFade:0.04 },      // sparse, quiet
+      circuit:    { stepProb:0.15, skipProb:0.15, leapProb:0.5, repeatProb:0.1, minLen:4, maxLen:6, gateBase:0.06, velStart:0.42, velFade:0.04 },     // rapid arpeggiated bursts
+      piano:      { stepProb:0.4, skipProb:0.3, leapProb:0.1, repeatProb:0.1, minLen:3, maxLen:5, gateBase:0.4, velStart:0.4, velFade:0.05 },         // lyrical, singable
+      lofi:       { stepProb:0.45, skipProb:0.25, leapProb:0.05, repeatProb:0.15, minLen:2, maxLen:4, gateBase:0.35, velStart:0.35, velFade:0.04 },   // chill, stepwise, laid back
     };
 
     function getMelodyStyle() {
@@ -2060,10 +2437,14 @@
       const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
       const octOffset = melodyOctave;
 
-      let baseIdx = Math.floor(signalNorm * (currentNotes.length * 0.6));
-      baseIdx = Math.max(0, Math.min(currentNotes.length - 1, baseIdx + Math.floor(octOffset * notesPerOctave)));
-      const signalJitter = Math.floor((Math.random() - 0.5) * 4);
-      baseIdx = Math.max(0, Math.min(currentNotes.length - 1, baseIdx + signalJitter));
+      // Clamp melody to the 2nd octave of the pool (middle register, avoids very high notes)
+      const rangeStart = Math.floor(notesPerOctave * 1);        // start of 2nd pool octave
+      const rangeEnd = Math.floor(notesPerOctave * 2) - 1;      // last note of 2nd pool octave
+      const rangeSize = Math.max(1, rangeEnd - rangeStart);
+      let baseIdx = rangeStart + Math.floor(signalNorm * rangeSize);
+      baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + Math.floor(octOffset * notesPerOctave * 0.5)));
+      const signalJitter = Math.floor((Math.random() - 0.5) * 2); // tighter jitter
+      baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + signalJitter));
 
       let curIdx = baseIdx;
       const degreesPerOctave = notesPerOctave;
@@ -2096,17 +2477,18 @@
           }
         }
 
-        curIdx = Math.max(0, Math.min(currentNotes.length - 1, curIdx + step));
+        // Clamp phrase movement to the melody range — can't drift into octave 6+
+        curIdx = Math.max(rangeStart, Math.min(rangeEnd, curIdx + step));
 
         // Last note resolves toward stable tones
         if (i === phraseLen - 1) {
           const curDegree = curIdx % degreesPerOctave;
           if (!STABLE_TONES.has(curDegree)) {
-            curIdx = Math.max(0, Math.min(currentNotes.length - 1, curIdx + (curDegree > 2 ? -1 : 1)));
+            curIdx = Math.max(rangeStart, Math.min(rangeEnd, curIdx + (curDegree > 2 ? -1 : 1)));
           }
         }
 
-        const vel = Math.max(0.15, style.velStart - (i * style.velFade) + (i === 0 ? 0.1 : 0));
+        const vel = Math.max(0.12, style.velStart - (i * style.velFade) + (i === 0 ? 0.04 : 0));
         const gate = i === phraseLen - 1 ? style.gateBase * 1.5 : style.gateBase + (Math.random() * 0.1 - 0.05);
 
         notes.push({ note: currentNotes[curIdx], vel, gate });
@@ -2116,12 +2498,13 @@
     }
 
     function melodyTick() {
-      if (!melodyEnabled || !musicPlaying || !osc1Synth) return;
+      const arrLayers = ARRANGEMENT_LAYERS[arrangementState] || ARRANGEMENT_LAYERS.flowing;
+      if (!melodyEnabled || !arrLayers.melodyActive || !musicPlaying || !osc1Synth) return;
       const now = Date.now();
 
-      // Melody phrases play on any step
+      // Melody phrases play on odd steps (avoids stacking with drone/bass on beat 0/4/8/12)
       if (melodyPhrase.length > 0 && melodyPhraseIdx < melodyPhrase.length) {
-        const onMelodyStep = percOnStep;
+        const onMelodyStep = percOnStep && (percStep % 2 === 1 || melodyPhraseIdx > 0);
         if (onMelodyStep) {
           // Sometimes skip a step for rhythmic variety
           if (Math.random() < 0.7 || melodyPhraseIdx === 0) {
@@ -2285,11 +2668,39 @@
       const p = { kick: [], snare: [], hat: [], rim: [], bass: [] };
       for (let tier = 0; tier < 5; tier++) {
         const density = tier / 4; // 0 to 1
-        p.kick.push(genLine(16, recipe.kickHits, density, recipe.kickAccent || [0], recipe.swing || 0));
+        // Essential kick recipes force ALL kick hits at all tiers (e.g. synthwave four-on-floor)
+        const kickDensity = recipe.essentialKick ? 1.0 : density;
+        p.kick.push(genLine(16, recipe.kickHits, kickDensity, recipe.kickAccent || [0], recipe.swing || 0));
         p.snare.push(genLine(16, recipe.snareHits, density, recipe.snareAccent || [4, 12], recipe.swing || 0));
         p.hat.push(genLine(16, recipe.hatHits, density, recipe.hatAccent || [0, 4, 8, 12], recipe.swing || 0));
         p.rim.push(genLine(16, recipe.rimHits, density, recipe.rimAccent || [], recipe.swing || 0));
         p.bass.push(genBassLine(16, recipe.bassHits, density, recipe.bassWalk || false));
+
+        // Collision rules (modeled on a real drummer):
+        // - Kick = right foot (independent, always plays)
+        // - Snare/rim = left hand (mutual exclusive unless ghost snare)
+        // - Hat = right hand
+        // - Max: kick + one hand hit. Two hand instruments = not possible.
+        for (let step = 0; step < 16; step++) {
+          // Snare accent kills rim (ghost snare + rim ok)
+          if (p.snare[tier][step] > 1 && p.rim[tier][step] > 0) {
+            p.rim[tier][step] = 0;
+          }
+          // Count hand instruments (snare, hat, rim — not kick)
+          const hands = [];
+          if (p.snare[tier][step] > 0) hands.push('snare');
+          if (p.hat[tier][step] > 0) hands.push('hat');
+          if (p.rim[tier][step] > 0) hands.push('rim');
+          // Keep max 1 hand instrument (priority: snare > hat > rim)
+          if (hands.length > 1) {
+            const keep = hands[0]; // highest priority
+            if (keep !== 'hat') p.hat[tier][step] = 0;
+            if (keep !== 'rim') p.rim[tier][step] = 0;
+            if (keep !== 'snare' && hands.includes('snare')) {
+              // shouldn't happen since snare is first priority, but safety
+            }
+          }
+        }
       }
       return p;
     }
@@ -2341,47 +2752,63 @@
 
     // Unique recipes per preset
     const PERC_RECIPES = {
+      // Whisper — barely-there texture for ambient presets
+      whisper: {
+        kickHits: [0], kickAccent: [],           // single soft kick on 1, or none at low tiers
+        snareHits: [], snareAccent: [],           // no snare
+        hatHits: [0, 8], hatAccent: [0],          // just two soft ticks per bar
+        rimHits: [4, 12], rimAccent: [4],         // rim clicks instead of snare — subtle
+        bassHits: [], bassWalk: false, swing: 0,  // NO bass synth — whisper is texture only
+      },
       // Calm presets — sparse, space
       calm: {
         kickHits: [0, 8], kickAccent: [0],
         snareHits: [4, 12], snareAccent: [4, 12],
-        hatHits: [0, 4, 8, 12], hatAccent: [0, 8],
-        rimHits: [14], bassHits: [0, 8], swing: 0,
+        hatHits: [2, 6, 10, 14], hatAccent: [2, 10],
+        rimHits: [14], bassHits: [0, 4, 8, 12], bassWalk: true, swing: 0,
       },
       // Pluck — bouncy, syncopated, off-beat emphasis
       pluck: {
-        kickHits: [0, 3, 6, 10, 13], kickAccent: [0, 6],
+        kickHits: [0, 6, 10, 13], kickAccent: [0, 6],
         snareHits: [4, 11], snareAccent: [4],
-        hatHits: [0, 2, 4, 6, 8, 10, 12, 14], hatAccent: [2, 6, 10, 14],
-        rimHits: [3, 7, 11, 15], bassHits: [0, 3, 6, 10, 14], bassWalk: true, swing: 0,
+        hatHits: [1, 3, 5, 7, 9, 11, 13, 15], hatAccent: [3, 7, 11, 15],  // all off-beats
+        rimHits: [2, 8, 14], bassHits: [0, 6, 10, 14], bassWalk: true, swing: 0,
       },
       // Organic — swung, shuffled, triplet feel
       organic: {
         kickHits: [0, 5, 8, 13], kickAccent: [0, 8],
-        snareHits: [4, 7, 12, 15], snareAccent: [4, 12],
-        hatHits: [0, 3, 4, 7, 8, 11, 12, 15], hatAccent: [0, 4, 8, 12],
-        rimHits: [2, 10], bassHits: [0, 5, 8, 13], bassWalk: true, swing: 1,
+        snareHits: [4, 12], snareAccent: [4, 12],          // snare only on 4/12, not stacking
+        hatHits: [2, 3, 6, 7, 10, 11, 14, 15], hatAccent: [3, 7, 11, 15],  // off kick beats
+        rimHits: [1, 9], bassHits: [0, 5, 8, 13], bassWalk: true, swing: 1,
       },
       // Synthwave — four-on-floor, driving, steady
       synthwave: {
-        kickHits: [0, 4, 8, 12], kickAccent: [0, 8],
+        kickHits: [0, 4, 8, 12], kickAccent: [0, 8], essentialKick: true,
         snareHits: [4, 12], snareAccent: [4, 12],
-        hatHits: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], hatAccent: [0, 4, 8, 12],
-        rimHits: [2, 6, 10, 14], bassHits: [0, 4, 8, 12, 14], bassWalk: true, swing: 0,
+        hatHits: [2, 6, 10, 14], hatAccent: [],
+        rimHits: [1, 3, 5, 7, 9, 11, 13, 15],
+        bassHits: [0, 6, 8], bassWalk: true, swing: 0,  // syncopated 80s bass
       },
       // Circuit — broken, glitchy, irregular
       circuit: {
-        kickHits: [0, 1, 6, 7, 9, 12], kickAccent: [0, 7, 12],
+        kickHits: [0, 6, 7, 9, 12], kickAccent: [0, 7, 12],
         snareHits: [3, 5, 10, 14], snareAccent: [5, 14],
-        hatHits: [0, 2, 3, 5, 8, 10, 11, 13], hatAccent: [3, 5, 11, 13],
-        rimHits: [1, 4, 7, 9, 15], bassHits: [0, 1, 6, 9, 12], bassWalk: false, swing: 0,
+        hatHits: [1, 2, 4, 8, 11, 13, 15], hatAccent: [4, 11, 13],  // avoid kick steps
+        rimHits: [3, 5, 9, 15], bassHits: [0, 6, 9, 12], bassWalk: true, swing: 0,
       },
       // Groovy — default, standard pocket
       groovy: {
         kickHits: [0, 6, 8, 14], kickAccent: [0, 8],
         snareHits: [4, 12], snareAccent: [4, 12],
-        hatHits: [0, 2, 4, 6, 8, 10, 12, 14], hatAccent: [0, 4, 8, 12],
+        hatHits: [1, 2, 3, 5, 7, 9, 10, 11, 13, 15], hatAccent: [2, 5, 10, 13],  // off kick/snare beats
         rimHits: [6, 14], bassHits: [0, 6, 8, 14], bassWalk: true, swing: 0,
+      },
+      // Lo-fi — chill, shuffled, ghost notes, laid-back pocket
+      lofi: {
+        kickHits: [0, 8], kickAccent: [0],
+        snareHits: [5, 13], snareAccent: [5],
+        hatHits: [2, 4, 6, 10, 12, 14], hatAccent: [2, 10],  // off kick beats
+        rimHits: [3, 11], bassHits: [0, 5, 8, 13], bassWalk: true, swing: 1,
       },
       // Energetic — busy, driving
       energetic: {
@@ -2433,11 +2860,12 @@
     let percFxNodes = []; // track extra fx for disposal
 
     const PERC_CHARS = {
+      whisper:  { kickDecay:0.8, kickOct:5, snareDecay:0.4, hatDecay:0.15, hatFreq:4000, bassWave:'sine', bassFiltOct:1, velScale:0.35 },
       standard: { kickDecay:0.4, kickOct:3, snareDecay:0.2, hatDecay:0.06, hatFreq:8000, bassWave:'triangle', bassFiltOct:2.5 },
       tight:    { kickDecay:0.2, kickOct:2, snareDecay:0.1, hatDecay:0.03, hatFreq:10000, bassWave:'sawtooth', bassFiltOct:2 },
-      soft:     { kickDecay:0.6, kickOct:4, snareDecay:0.3, hatDecay:0.1, hatFreq:6000, bassWave:'sine', bassFiltOct:1.5 },
+      soft:     { kickDecay:0.6, kickOct:4, snareDecay:0.3, hatDecay:0.1, hatFreq:6000, bassWave:'sine', bassFiltOct:1.5, velScale:0.7 },
       distorted:{ kickDecay:0.3, kickOct:2, snareDecay:0.15, hatDecay:0.05, hatFreq:9000, bassWave:'sawtooth', bassFiltOct:3, dist:0.4 },
-      lofi:     { kickDecay:0.5, kickOct:3, snareDecay:0.25, hatDecay:0.08, hatFreq:5000, bassWave:'square', bassFiltOct:2, crush:true },
+      lofi:     { kickDecay:0.5, kickOct:3, snareDecay:0.25, hatDecay:0.1, hatFreq:3000, bassWave:'square', bassFiltOct:1.5, crush:true, velScale:0.55 },
     };
 
     function buildPercSynths() {
@@ -2453,7 +2881,10 @@
       // Drum bus compressor — gentle, preserves transients
       const percCompressor = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.005, release: 0.15, knee: 10 }).connect(masterGain);
       percFxNodes.push(percCompressor);
-      percGain = new Tone.Gain(Math.max(percVolume, 0.85)).connect(percCompressor);
+      // Start at the correct level for current arrangement state
+      const arrLayers = ARRANGEMENT_LAYERS[arrangementState] || ARRANGEMENT_LAYERS.gentle;
+      const initPercVol = arrLayers.percActive ? percVolume : percVolume * 0.15;
+      percGain = new Tone.Gain(initPercVol).connect(percCompressor);
 
       // Optional distortion/crush on percussion bus
       let percBus = percGain;
@@ -2518,7 +2949,7 @@
       }).connect(rimFilter);
 
       // === BASS: pitched in octave 3 so laptops can play it ===
-      bassGain = new Tone.Gain(0.7).connect(masterGain);
+      bassGain = new Tone.Gain(0.25).connect(masterGain);
       bassSynth = new Tone.MonoSynth({
         oscillator: { type: ch.bassWave },
         envelope: { attack: 0.003, decay: 0.25, sustain: 0.5, release: 0.15 },
@@ -2551,10 +2982,14 @@
         for (let i = 0; i < 16; i++) {
           const el = document.getElementById(`perc_${inst}_${i}`);
           if (!el) continue;
-          const isOn = pattern[i] > 0;
+          const level = pattern[i]; // 0=off, 1=ghost, 2=normal, 3=accent
+          const isOn = level > 0;
           const isPlaying = i === percStep;
           el.classList.toggle('on', isOn);
           el.classList.toggle('playing', isPlaying);
+          el.classList.toggle('vel-1', level === 1);
+          el.classList.toggle('vel-2', level === 2);
+          el.classList.toggle('vel-3', level === 3);
         }
       });
     }
@@ -2584,10 +3019,15 @@
 
       // Lock tier at the start of each bar (step 0)
       if (percStep === 0) {
-        percLockedTier = getPercDensityTier();
-        // Mutate pattern every ~4 bars based on plant signal for variation
-        if (Math.floor(Date.now() / (getSeqBeatMs() * 4 * 4)) !== percPatternMutationSeed) {
-          percPatternMutationSeed = Math.floor(Date.now() / (getSeqBeatMs() * 4 * 4));
+        const targetTier = getPercDensityTier();
+        // Smooth tier transitions — only allow ±1 per bar for musical flow
+        if (targetTier > percLockedTier) percLockedTier = Math.min(percLockedTier + 1, targetTier);
+        else if (targetTier < percLockedTier) percLockedTier = Math.max(percLockedTier - 1, targetTier);
+        // Mutate pattern seed for ghost note variation — every 2-4 bars
+        const barPeriod = 2 + Math.floor(Math.random() * 3); // 2-4 bars
+        if (Math.floor(Date.now() / (getSeqBeatMs() * 4 * barPeriod)) !== percPatternMutationSeed) {
+          percPatternMutationSeed = Math.floor(Date.now() / (getSeqBeatMs() * 4 * barPeriod));
+          _percPatternCache = {}; // force regeneration with new ghost placement
         }
       }
 
@@ -2595,59 +3035,127 @@
 
       // Percussion audio — only when enabled and synths exist
       if (!percEnabled || !percKick) {
-        // Update visual grid even when muted
         updatePercGridVisual();
         percStep = (percStep + 1) % 16;
         return;
       }
 
       // Play instruments based on current pattern
-      const velMap = [0, 0.4, 0.65, 0.9]; // velocity for levels 0-3
-      const kickVel = velMap[getPercPatterns().kick[tier][percStep]];
-      const snareVel = velMap[getPercPatterns().snare[tier][percStep]];
-      const hatVel = velMap[getPercPatterns().hat[tier][percStep]];
-      const rimVel = velMap[getPercPatterns().rim[tier][percStep]];
+      const velMap = [0, 0.4, 0.65, 0.9];
+      const ch = PERC_CHARS[percChar] || PERC_CHARS.standard;
+      const vs = ch.velScale || 1;
+
+      // Humanize: slight random velocity variation (±15%) + ghost note dropout
+      const humanize = (baseVel, level) => {
+        if (baseVel === 0) return 0;
+        // Ghost notes (level 1) have 30% chance to drop out
+        if (level === 1 && Math.random() < 0.3) return 0;
+        // ±12% velocity variation, clamped to 0.95 max to prevent clipping
+        return Math.min(0.95, baseVel * (0.88 + Math.random() * 0.24));
+      };
+
+      const patterns = getPercPatterns();
+      let kickLevel = patterns.kick[tier][percStep];
+      let snareLevel = patterns.snare[tier][percStep];
+      let hatLevel = patterns.hat[tier][percStep];
+      let rimLevel = patterns.rim[tier][percStep];
+
+      // Backbeat anchor — a good drummer drops a snare on 4 or 12 to keep the groove grounded
+      // Only fires if the recipe has no snare scheduled AND at low-ish probability
+      // so it doesn't crowd recipes that already have snare activity
+      if ((percStep === 4 || percStep === 12) && snareLevel === 0 && percChar !== 'whisper') {
+        // Check if the current bar already has a snare on another step — don't stack
+        const barPattern = patterns.snare[tier];
+        const barHasSnare = barPattern.some(s => s > 0);
+        if (!barHasSnare && Math.random() < 0.5) {
+          snareLevel = 2;
+          hatLevel = 0;
+          rimLevel = 0;
+        }
+      }
+
+      const kickVel = humanize(velMap[kickLevel] * vs, kickLevel);
+      const snareVel = humanize(velMap[snareLevel] * vs, snareLevel);
+      const hatVel = humanize(velMap[hatLevel] * vs, hatLevel);
+      const rimVel = humanize(velMap[rimLevel] * vs, rimLevel);
+
+      // Occasional spontaneous fill — 15% chance at bar end (steps 14-15) when activity > 15%
+      const isFillZone = percStep >= 14 && currentActivity > 15;
+      if (isFillZone && Math.random() < 0.15) {
+        // Quick flam: trigger an extra snare or rim hit
+        if (percSnare && Math.random() < 0.5) {
+          percSnare.triggerAttackRelease('32n', undefined, 0.3 * vs);
+        } else if (percRim) {
+          percRim.triggerAttackRelease('32n', undefined, 0.3 * vs);
+        }
+      }
 
       if (kickVel > 0) {
         percKick.triggerAttackRelease('G2', '8n', undefined, kickVel);
         if (percKick._click) percKick._click.triggerAttackRelease('32n', undefined, kickVel * 0.7);
         // Sidechain duck — kick pumps the synth bus down
+        // Lo-fi/lofi char gets deeper, slower pump (classic lo-fi sidechain feel)
         if (masterGain) {
-          const duckAmount = 0.3 + kickVel * 0.3; // duck to 30-60% of current level
+          const isLofi = percChar === 'lofi';
+          const duckAmount = isLofi ? (0.25 + kickVel * 0.2) : (0.15 + kickVel * 0.2);
+          const releaseTime = isLofi ? 0.3 : 0.15;
           const currentLevel = clamp01(getModValue('amp_level'));
           const duckedLevel = currentLevel * (1 - duckAmount);
           masterGain.gain.cancelScheduledValues(Tone.now());
           masterGain.gain.setValueAtTime(duckedLevel, Tone.now());
-          masterGain.gain.linearRampToValueAtTime(currentLevel, Tone.now() + 0.18);
+          masterGain.gain.linearRampToValueAtTime(currentLevel, Tone.now() + releaseTime);
         }
         logNoteEvent('kick', kickVel, 'perc');
       }
       if (snareVel > 0) {
         percSnare.triggerAttackRelease('16n', undefined, snareVel);
         if (percSnare._body) percSnare._body.triggerAttackRelease('A3', '16n', undefined, snareVel * 0.6);
+        // Sidechain duck on snare too — lighter than kick
+        if (masterGain && snareVel > 0.4) {
+          const isLofi = percChar === 'lofi';
+          const sDuck = isLofi ? 0.2 : 0.1;
+          const sRelease = isLofi ? 0.2 : 0.1;
+          const currentLevel = clamp01(getModValue('amp_level'));
+          masterGain.gain.cancelScheduledValues(Tone.now());
+          masterGain.gain.setValueAtTime(currentLevel * (1 - sDuck), Tone.now());
+          masterGain.gain.linearRampToValueAtTime(currentLevel, Tone.now() + sRelease);
+        }
         logNoteEvent('snare', snareVel, 'perc');
       }
       if (hatVel > 0) { percHat.triggerAttackRelease('32n', undefined, hatVel); logNoteEvent('hat', hatVel, 'perc'); }
       if (rimVel > 0) { percRim.triggerAttackRelease('32n', undefined, rimVel); logNoteEvent('rim', rimVel, 'perc'); }
 
-      // Bass — plays in key, follows current chord root
+      // Bass — plays in the lowest octave only, walks scale degrees
       if (bassSynth) {
         const bassStep = getPercPatterns().bass[tier][percStep];
         if (bassStep > 0) {
-          // Get root note from current scale in low octave
-          const root = mapSignalToNote(currentSmoothed, 0); // mid range — audible on all speakers
-          const rootIdx = currentNotes.indexOf(root);
-          let bassNote = root;
-          if (bassStep === 4 && rootIdx >= 0 && rootIdx + 3 < currentNotes.length) {
-            bassNote = currentNotes[rootIdx + 3]; // fifth (approx, depends on scale)
-          } else if (bassStep === 5 && rootIdx >= 0) {
-            // octave up from root
-            const notesPerOct = currentNotes.length / 4;
-            const upIdx = Math.min(currentNotes.length - 1, rootIdx + Math.round(notesPerOct));
-            bassNote = currentNotes[upIdx];
+          // Lock bass to the very first octave of the note pool
+          const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
+          // Root is always note 0 (lowest root of the scale)
+          let rootIdx = 0;
+          let bassNote = currentNotes[rootIdx];
+          // Walking bass — step-based pattern with variation
+          const recipe = PERC_RECIPES[percFeel];
+          if (recipe && recipe.bassWalk) {
+            // Multiple walk patterns — pick based on 2-bar cycle for variation
+            const cycleBar = Math.floor(Date.now() / (getSeqBeatMs() * 4 * 2)) % 3;
+            const walkPatterns = [
+              // Root-3rd-5th walk
+              { 0:0, 1:1, 2:2, 3:1, 4:0, 5:2, 6:3, 7:2, 8:0, 9:1, 10:2, 11:3, 12:0, 13:2, 14:1, 15:2 },
+              // Descending walk
+              { 0:4, 1:3, 2:2, 3:1, 4:0, 5:1, 6:2, 7:3, 8:4, 9:3, 10:2, 11:1, 12:0, 13:1, 14:2, 15:3 },
+              // Syncopated
+              { 0:0, 1:2, 2:4, 3:2, 4:1, 5:3, 6:1, 7:4, 8:0, 9:3, 10:2, 11:4, 12:1, 13:3, 14:2, 15:0 },
+            ];
+            const walkOffsets = walkPatterns[cycleBar];
+            const offset = walkOffsets[percStep] || 0;
+            const targetIdx = Math.min(notesPerOctave - 1, rootIdx + offset);
+            bassNote = currentNotes[targetIdx];
           }
-          const bassVelMap = [0, 0.5, 0.7, 0.9, 0.7, 0.7];
-          const bVel = bassVelMap[Math.min(bassStep, 5)];
+          // Transpose down an octave for real bass range (octave 2 instead of 3)
+          try { bassNote = Tone.Frequency(bassNote).transpose(-12).toNote(); } catch(_) {}
+          const bassVelMap = [0, 0.2, 0.3, 0.4, 0.3, 0.3];
+          const bVel = bassVelMap[Math.min(bassStep, 5)] * vs;
           bassSynth.triggerAttackRelease(bassNote, '4n', undefined, bVel);
           // Sub-bass: octave below the bass note for full-range speakers
           if (subBassSynth) {
@@ -2666,23 +3174,34 @@
       percStep = (percStep + 1) % 16;
     }
 
+    function syncPercUI() {
+      // Sync the strip toggle
+      const strip = document.getElementById('percStripToggle');
+      const status = document.getElementById('percStripStatus');
+      if (strip) strip.classList.toggle('on', percEnabled);
+      if (status) {
+        status.textContent = percEnabled ? 'On' : 'Off';
+        status.style.color = percEnabled ? '#d4956a' : '#5a6a8a';
+      }
+      // Build grid if not yet built
+      if (percEnabled) {
+        const grid = document.getElementById('percGrid');
+        if (grid && grid.children.length === 0) buildPercGrid();
+      }
+    }
+
     function togglePerc() {
       percEnabled = !percEnabled;
-      // Sync all perc toggle buttons
-      ['percToggle', 'percToggleInline'].forEach(id => {
-        const btn = document.getElementById(id);
-        if (btn) { btn.textContent = percEnabled ? 'ON' : 'OFF'; btn.classList.toggle('on', percEnabled); }
-      });
-      const sec = document.getElementById('percSection');
-      if (sec) {
-        sec.classList.toggle('perc-off', !percEnabled);
-        // Hide entire section when off, show when on
-        if (!percEnabled) sec.style.display = 'none';
-        else { sec.style.display = ''; sec.classList.add('active'); }
-      }
+      syncPercUI();
       if (percEnabled && !percGain) buildPercSynths();
+      // Immediately set perc to audible level when toggled on
+      if (percEnabled && percGain) percGain.gain.rampTo(percVolume * 0.5, 0.1);
       if (!percEnabled) percStep = 0;
       scheduleSave();
+    }
+
+    function togglePercStrip() {
+      togglePerc();
     }
 
     // --- Main Tick ---
@@ -2691,8 +3210,10 @@
       logSignalState();
       percTick();           // first — sets quantize flags for everything else
       tickLFOs();
-      updateXYPad();        // morph synth params from XY position before applying
-      applySynthParams();
+      updateXYPad();        // morph synth params from XY position
+      applyMacros();        // macro gestures overwrite params with absolute ranges
+      updateArrangement();  // activity-driven layer fades
+      applySynthParams();   // push everything to Tone.js nodes
       filterPulseTick();
       melodyTick();
       sequencerTick();
@@ -2706,16 +3227,20 @@
       const btn = document.getElementById('musicBtn');
       if (!musicPlaying) {
         await Tone.start();
-        if (!osc1Synth) buildSynthGraph();
+        if (!osc1Synth) {
+          buildSynthGraph();
+          // Re-apply vinyl level — preset loaded before graph existed
+          const vPreset = FACTORY_PRESETS[currentPresetName];
+          if (vinylGain && vPreset && vPreset._vinyl) {
+            vinylGain.gain.rampTo(vPreset._vinyl, 0.3);
+          }
+        }
         musicPlaying = true;
         btn.textContent = 'Stop';
         btn.classList.add('playing');
         musicLoop = setInterval(musicTick, 50);
         startVisualization();
-        // Show perc section, build grid and synths
-        const percSec = document.getElementById('percSection');
-        if (percSec) percSec.classList.add('active');
-        // melody section removed — controlled by presets + inline toggle
+        // Build perc synths and grid (but don't auto-open the tab)
         if (!percGain) buildPercSynths();
         buildPercGrid();
         // Start drone if in drone mode
@@ -2957,7 +3482,7 @@
     }
 
     // --- XY Morph Pad Engine ---
-    const xyAxisSource = { x: 'ch1_smooth', y: 'ch2_smooth' };
+    const xyAxisSource = { x: 'ch1_smooth', y: 'ch1_activity' };
     let xyX = 0.5, xyY = 0.5;
     let xyDragging = false;
     let xyManualOverride = false; // true while mouse is held on pad
@@ -2972,8 +3497,35 @@
       'lfo1_rate','lfo1_depth','lfo2_rate','lfo2_depth',
     ];
 
-    function toggleXYPad() {
-      document.getElementById('xyPadSection').classList.toggle('open');
+    function toggleXYPad() { switchTab('xypad'); }
+
+    function switchTab(tabName) {
+      const tabs = document.querySelectorAll('.panel-tab');
+      const contents = document.querySelectorAll('.panel-tab-content');
+      const clickedTab = document.querySelector(`.panel-tab[data-tab="${tabName}"]`);
+      const isActive = clickedTab && clickedTab.classList.contains('active');
+
+      // Deactivate all
+      tabs.forEach(t => t.classList.remove('active'));
+      contents.forEach(c => c.classList.remove('active'));
+
+      // If clicking the already-active tab, just close (toggle off)
+      if (isActive) return;
+
+      // Activate the clicked tab
+      if (clickedTab) clickedTab.classList.add('active');
+      const content = document.querySelector(`.panel-tab-content[data-tab-content="${tabName}"]`);
+      if (content) content.classList.add('active');
+
+      // Tab-specific init
+      if (tabName === 'patchbay') {
+        buildPatchBay();
+        drawPatchCables();
+      }
+      if (tabName === 'percussion') {
+        const grid = document.getElementById('percGrid');
+        if (grid && grid.children.length === 0) buildPercGrid();
+      }
     }
 
     function captureSnapshot() {
@@ -3126,31 +3678,31 @@
     const PATCH_SRC_GROUPS = [
       { label: 'Clips A', items: [
         { id: 'ch1_raw', label: 'Raw', color: '#34d399' },
-        { id: 'ch1_smooth', label: 'Smooth', color: '#34d399' },
-        { id: 'ch1_activity', label: 'Activity', color: '#34d399' },
+        { id: 'ch1_smooth', label: 'Smooth', color: '#2dd4bf' },
+        { id: 'ch1_activity', label: 'Activity', color: '#a3e635' },
       ]},
       { label: 'Clips B', items: [
-        { id: 'ch2_raw', label: 'Raw', color: '#6ea8fe' },
-        { id: 'ch2_smooth', label: 'Smooth', color: '#6ea8fe' },
-        { id: 'ch2_activity', label: 'Activity', color: '#6ea8fe' },
+        { id: 'ch2_raw', label: 'Raw', color: '#60a5fa' },
+        { id: 'ch2_smooth', label: 'Smooth', color: '#93c5fd' },
+        { id: 'ch2_activity', label: 'Activity', color: '#3b82f6' },
       ]},
       { label: 'TENS Pads', items: [
         { id: 'ch3_raw', label: 'Raw', color: '#f472b6' },
-        { id: 'ch3_smooth', label: 'Smooth', color: '#f472b6' },
-        { id: 'ch3_activity', label: 'Activity', color: '#f472b6' },
+        { id: 'ch3_smooth', label: 'Smooth', color: '#f9a8d4' },
+        { id: 'ch3_activity', label: 'Activity', color: '#ec4899' },
       ]},
       { label: 'Derived', items: [
         { id: 'diff_12', label: 'Clip \u0394', color: '#a78bfa' },
-        { id: 'avg_all', label: 'Average', color: '#a78bfa' },
-        { id: 'max_activity', label: 'Max Act', color: '#a78bfa' },
+        { id: 'avg_all', label: 'Average', color: '#c4b5fd' },
+        { id: 'max_activity', label: 'Max Act', color: '#8b5cf6' },
       ]},
       { label: 'XY Pad', items: [
         { id: 'xy_x', label: 'X Axis', color: '#d4956a' },
-        { id: 'xy_y', label: 'Y Axis', color: '#d4956a' },
+        { id: 'xy_y', label: 'Y Axis', color: '#e8c8a0' },
       ]},
       { label: 'LFO', items: [
         { id: 'lfo1', label: 'LFO 1', color: '#fbbf24' },
-        { id: 'lfo2', label: 'LFO 2', color: '#fbbf24' },
+        { id: 'lfo2', label: 'LFO 2', color: '#f59e0b' },
       ]},
     ];
 
@@ -3168,14 +3720,7 @@
 
     let patchDragState = null; // { srcId, srcEl } while dragging
 
-    function togglePatchBay() {
-      const bay = document.getElementById('patchBay');
-      bay.classList.toggle('open');
-      if (bay.classList.contains('open')) {
-        buildPatchBay();
-        drawPatchCables();
-      }
-    }
+    function togglePatchBay() { switchTab('patchbay'); }
 
     function buildPatchBay() {
       const srcCol = document.getElementById('patchSrcCol');
@@ -3211,8 +3756,29 @@
           jack.dataset.dstId = paramName;
           jack.innerHTML = `<div class="jack-socket" id="dst-jack-${paramName}"></div><span>${p ? p.label : paramName}</span>`;
           jack.addEventListener('mouseup', (e) => endPatchDrag(e, paramName));
-          jack.addEventListener('click', (e) => {
-            if (!patchDragState) showCablePopup(paramName, e);
+          jack.addEventListener('mousedown', (e) => {
+            if (patchDragState) return;
+            const r = modRouting[paramName];
+            if (!r || r.source === 'fixed' || r.depth === 0) return;
+            // Unplug this end and start re-dragging from the source
+            e.preventDefault();
+            e.stopPropagation();
+            const srcId = _legacyJackMap[r.source] || r.source;
+            const oldDepth = r.depth;
+            // Clear the connection
+            modRouting[paramName] = { source: 'fixed', depth: 0 };
+            const srcSel = document.querySelector(`.mod-src[data-param="${paramName}"]`);
+            if (srcSel) srcSel.value = 'fixed';
+            drawPatchCables();
+            // Start dragging from the original source, carrying the old depth
+            patchDragState = { srcId, oldDepth, repatching: paramName };
+            const srcSocket = document.getElementById('src-jack-' + srcId);
+            if (srcSocket) srcSocket.classList.add('connected');
+            patchDragState.mouseX = e.clientX;
+            patchDragState.mouseY = e.clientY;
+            document.addEventListener('mousemove', onPatchDragMove);
+            document.addEventListener('mouseup', onPatchDragEnd);
+            _dragAnimFrame = requestAnimationFrame(renderDragCable);
           });
           dstCol.appendChild(jack);
         });
@@ -3230,36 +3796,79 @@
       document.addEventListener('mouseup', onPatchDragEnd);
     }
 
+    let _dragAnimFrame = null;
+
     function onPatchDragMove(e) {
       if (!patchDragState) return;
+      patchDragState.mouseX = e.clientX;
+      patchDragState.mouseY = e.clientY;
+      if (!_dragAnimFrame) {
+        _dragAnimFrame = requestAnimationFrame(renderDragCable);
+      }
+    }
+
+    function renderDragCable() {
+      _dragAnimFrame = null;
+      if (!patchDragState) return;
       const svg = document.getElementById('patchSvg');
+      const color = SRC_COLORS[patchDragState.srcId] || '#d4956a';
+
       let dragLine = svg.querySelector('.cable-drag');
       if (!dragLine) {
         dragLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         dragLine.classList.add('cable-drag');
-        dragLine.setAttribute('stroke', SRC_COLORS[patchDragState.srcId] || '#d4956a');
+        dragLine.setAttribute('stroke', color);
         svg.appendChild(dragLine);
       }
+      // Remove old drag plug
+      svg.querySelectorAll('.drag-plug').forEach(el => el.remove());
+
       const srcSocket = document.getElementById('src-jack-' + patchDragState.srcId);
       if (!srcSocket) return;
       const bayRect = document.getElementById('patchBayInner').getBoundingClientRect();
       const srcRect = srcSocket.getBoundingClientRect();
       const x1 = srcRect.left + srcRect.width / 2 - bayRect.left;
       const y1 = srcRect.top + srcRect.height / 2 - bayRect.top;
-      const x2 = e.clientX - bayRect.left;
-      const y2 = e.clientY - bayRect.top;
-      dragLine.setAttribute('d', cablePath(x1, y1, x2, y2));
+      const x2 = patchDragState.mouseX - bayRect.left;
+      const y2 = patchDragState.mouseY - bayRect.top;
+
+      // Loose/dangly cable path
+      dragLine.setAttribute('d', cablePath(x1, y1, x2, y2, true));
+
+      // Plug at source (stays put)
+      const srcPlug = drawPlug(svg, x1, y1, color, 0);
+      srcPlug.classList.add('drag-plug');
+
+      // Dangling plug at cursor
+      const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI + 90;
+      const dstPlug = drawPlug(svg, x2, y2, color, angle);
+      dstPlug.classList.add('drag-plug');
+
+      // Keep animating for the wobble effect
+      if (patchDragState) {
+        _dragAnimFrame = requestAnimationFrame(renderDragCable);
+      }
     }
 
     function onPatchDragEnd(e) {
       document.removeEventListener('mousemove', onPatchDragMove);
       document.removeEventListener('mouseup', onPatchDragEnd);
-      // Remove drag line
+      if (_dragAnimFrame) { cancelAnimationFrame(_dragAnimFrame); _dragAnimFrame = null; }
+      // Remove drag line and plugs
       const svg = document.getElementById('patchSvg');
-      const dragLine = svg.querySelector('.cable-drag');
-      if (dragLine) dragLine.remove();
-      // Remove highlight if no connection was made
+      svg.querySelectorAll('.cable-drag, .drag-plug').forEach(el => el.remove());
       if (patchDragState) {
+        // Dropped on empty space — disconnect the cable
+        if (patchDragState.repatching) {
+          const dstParam = patchDragState.repatching;
+          modRouting[dstParam] = { source: 'fixed', depth: 0 };
+          const srcSel = document.querySelector(`.mod-src[data-param="${dstParam}"]`);
+          if (srcSel) srcSel.value = 'fixed';
+          const depthEl = document.querySelector(`.mod-depth[data-param="${dstParam}"]`);
+          if (depthEl) depthEl.value = 0;
+          drawPatchCables();
+          scheduleSave();
+        }
         updateJackStates();
       }
       patchDragState = null;
@@ -3269,13 +3878,15 @@
       if (!patchDragState) return;
       e.stopPropagation();
       const srcId = patchDragState.srcId;
+      // Use carried depth from re-patch, or existing, or default 0.5
+      const depth = patchDragState.oldDepth || modRouting[dstParam]?.depth || 0.5;
       // Create connection
-      modRouting[dstParam] = { source: srcId, depth: modRouting[dstParam]?.depth || 0.5 };
+      modRouting[dstParam] = { source: srcId, depth };
       // Sync dropdown UI
       const srcSel = document.querySelector(`.mod-src[data-param="${dstParam}"]`);
       if (srcSel) srcSel.value = srcId;
       const depthEl = document.querySelector(`.mod-depth[data-param="${dstParam}"]`);
-      if (depthEl) depthEl.value = Math.round(modRouting[dstParam].depth * 100);
+      if (depthEl) depthEl.value = Math.round(depth * 100);
       drawPatchCables();
       scheduleSave();
     }
@@ -3327,15 +3938,54 @@
       }
     });
 
-    function cablePath(x1, y1, x2, y2) {
-      // Catenary-style droop cable — sags down based on horizontal distance
+    function cablePath(x1, y1, x2, y2, loose) {
+      if (!loose) {
+        // Connected: tight straight line (slight ease to not look robotic)
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const sag = Math.min(8, dist * 0.02); // barely perceptible droop
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2 + sag;
+        return `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
+      }
+      // Loose/dragging: heavy sag with physics feel
       const dx = x2 - x1;
       const dy = y2 - y1;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const sag = Math.min(60, dist * 0.25 + 15); // natural droop
+      const sag = Math.min(120, dist * 0.4 + 30);
       const mx = (x1 + x2) / 2;
-      const my = (y1 + y2) / 2 + sag;
-      return `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
+      const my = Math.max(y1, y2) + sag;
+      // Add a slight S-curve wobble for organic feel
+      const wobble = Math.sin(Date.now() / 200) * 5;
+      return `M ${x1} ${y1} C ${x1 + 20} ${y1 + sag * 0.3 + wobble}, ${x2 - 20} ${my + wobble}, ${x2} ${y2}`;
+    }
+
+    function drawPlug(svg, x, y, color, angle) {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.classList.add('plug');
+      // Plug barrel
+      const barrel = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      barrel.setAttribute('x', -4); barrel.setAttribute('y', -7);
+      barrel.setAttribute('width', 8); barrel.setAttribute('height', 14);
+      barrel.setAttribute('rx', 2.5); barrel.setAttribute('ry', 2.5);
+      barrel.setAttribute('fill', '#1a2540');
+      barrel.setAttribute('stroke', color);
+      barrel.setAttribute('stroke-width', 1.2);
+      barrel.setAttribute('opacity', '0.9');
+      g.appendChild(barrel);
+      // Plug tip (the metal part)
+      const tip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      tip.classList.add('plug-tip');
+      tip.setAttribute('x', -2); tip.setAttribute('y', -3);
+      tip.setAttribute('width', 4); tip.setAttribute('height', 6);
+      tip.setAttribute('rx', 1); tip.setAttribute('ry', 1);
+      tip.setAttribute('fill', color);
+      tip.setAttribute('opacity', '0.6');
+      g.appendChild(tip);
+      g.setAttribute('transform', `translate(${x},${y}) rotate(${angle})`);
+      svg.appendChild(g);
+      return g;
     }
 
     function drawPatchCables() {
@@ -3343,13 +3993,15 @@
       if (!svg) return;
       const bayRect = document.getElementById('patchBayInner').getBoundingClientRect();
 
-      // Clear existing cables (keep drag line if any)
-      svg.querySelectorAll('.cable').forEach(el => el.remove());
+      // Clear existing cables and plugs
+      svg.querySelectorAll('.cable, .plug').forEach(el => el.remove());
 
       MODULATABLE.forEach(dstParam => {
         const r = modRouting[dstParam];
         if (!r || r.source === 'fixed' || r.depth === 0) return;
-        const srcSocket = document.getElementById('src-jack-' + r.source);
+        const legacyMap = { 'plant_raw': 'ch1_raw', 'plant_smooth': 'ch1_smooth', 'plant_activity': 'ch1_activity' };
+        const srcId = legacyMap[r.source] || r.source;
+        const srcSocket = document.getElementById('src-jack-' + srcId);
         const dstSocket = document.getElementById('dst-jack-' + dstParam);
         if (!srcSocket || !dstSocket) return;
 
@@ -3360,18 +4012,29 @@
         const x2 = dstRect.left + dstRect.width / 2 - bayRect.left;
         const y2 = dstRect.top + dstRect.height / 2 - bayRect.top;
 
+        const color = SRC_COLORS[srcId] || SRC_COLORS[r.source] || '#d4956a';
+
+        // Cable line — tight/straight for connected
         const cable = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         cable.classList.add('cable');
-        cable.setAttribute('d', cablePath(x1, y1, x2, y2));
-        cable.setAttribute('stroke', SRC_COLORS[r.source] || '#d4956a');
-        cable.style.strokeWidth = Math.max(1.5, Math.abs(r.depth) * 4);
-        cable.style.opacity = 0.3 + Math.abs(r.depth) * 0.5;
+        cable.setAttribute('d', cablePath(x1, y1, x2, y2, false));
+        cable.setAttribute('stroke', color);
+        cable.style.strokeWidth = Math.max(2, Math.abs(r.depth) * 3.5);
+        cable.style.opacity = 0.4 + Math.abs(r.depth) * 0.45;
         cable.addEventListener('click', (e) => showCablePopup(dstParam, e));
         svg.appendChild(cable);
+
+        // Plugs at each end
+        const angle1 = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+        drawPlug(svg, x1, y1, color, angle1);
+        drawPlug(svg, x2, y2, color, angle1 + 180);
       });
 
       updateJackStates();
     }
+
+    // Map legacy plant_* aliases to ch1 jack IDs
+    const _legacyJackMap = { 'plant_raw': 'ch1_raw', 'plant_smooth': 'ch1_smooth', 'plant_activity': 'ch1_activity' };
 
     function updateJackStates() {
       // Reset all jacks
@@ -3382,11 +4045,12 @@
       MODULATABLE.forEach(dstParam => {
         const r = modRouting[dstParam];
         if (r && r.source !== 'fixed' && r.depth !== 0) {
-          activeSrcs.add(r.source);
+          const srcId = _legacyJackMap[r.source] || r.source;
+          activeSrcs.add(srcId);
           const dstSocket = document.getElementById('dst-jack-' + dstParam);
           if (dstSocket) {
             dstSocket.classList.add('connected');
-            dstSocket.style.setProperty('--jack-color', SRC_COLORS[r.source] || '#d4956a');
+            dstSocket.style.setProperty('--jack-color', SRC_COLORS[srcId] || SRC_COLORS[r.source] || '#d4956a');
           }
         }
       });
@@ -3406,7 +4070,9 @@
     // --- Preset System ---
     const FACTORY_PRESETS = {
       default: {
-        _perc: false, _percFeel: 'groovy', _percChar: 'standard', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 85,
+        seq_mode: 'generative', seq_voice: 'poly', seq_prob: 0.4, seq_gate: 0.5,
+        _perc: false, _percFeel: 'groovy', _percChar: 'standard', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 85, _scale: 'pentatonic', _root: 'G',
+        _macros: { energy: 'plant_activity' },
         _mod:{
           filter_cutoff:{ source:'plant_smooth', depth:0.7 },
           osc2_level:{ source:'plant_raw', depth:0.6 },
@@ -3431,25 +4097,23 @@
           osc2_level:{ source:'plant_raw', depth:-0.3 },       // osc2 inverse — timbre shifts
           rev_wet:{ source:'plant_smooth', depth:0.6 },        // low voltage = dry, high = washed
           dly_wet:{ source:'plant_activity', depth:0.7 },      // activity adds echo
-        }, lfo1_rate:3, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 75
+        }, lfo1_rate:3, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 75, _scale: 'pentatonic', _root: 'C',
+        _macros: { space: 'plant_activity', energy: 'plant_smooth' }
       },
 
-      // PAD — massive detuned wash, ultra-slow, smothered in reverb + chorus
+      // PAD — warm detuned wash, spacious but controlled
       pad: {
-        osc1_wave:'fatsine', osc2_wave:'fatsawtooth', osc1_spread:60, osc2_spread:40,
-        osc1_detune:0, osc2_detune:3, osc2_level:0.3,
-        filter_cutoff:800, filter_res:0.3, filter_env_amt:1,
-        amp_a:5, amp_d:4, amp_s:0.9, amp_r:8, amp_level:0.4,
-        rev_decay:14, rev_wet:0.85, chr_wet:0.7, chr_rate:0.15,
+        osc1_wave:'fatsine', osc2_wave:'fatsawtooth', osc1_spread:40, osc2_spread:25,
+        osc1_detune:0, osc2_detune:3, osc2_level:0.3, osc2_octave:-1,
+        filter_cutoff:1500, filter_res:0.3, filter_env_amt:1,
+        amp_a:4, amp_d:3, amp_s:0.8, amp_r:6, amp_level:0.4,
+        rev_decay:8, rev_wet:0.4, chr_wet:0.3, chr_rate:0.12,
         seq_mode:'drone', seq_prob:0.2,
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.8 },  // massive filter sweep with voltage
-          osc1_level:{ source:'plant_smooth', depth:0.4 },     // osc1 fades in/out with position
-          osc2_level:{ source:'plant_raw', depth:0.5 },        // osc2 crossfades — timbre morphs
-          osc1_detune:{ source:'plant_raw', depth:0.3 },       // raw voltage drifts pitch
-          chr_wet:{ source:'plant_smooth', depth:0.5 },        // chorus swells with voltage
-          rev_wet:{ source:'plant_raw', depth:0.3 },           // reverb follows raw signal
-        }, lfo1_rate:0.04, lfo1_wave:'triangle', _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 70
+          osc1_level:{ source:'plant_smooth', depth:0.3 },     // osc balance shifts
+          osc2_level:{ source:'plant_raw', depth:0.3 },        // timbre morphs
+        }, lfo1_rate:0.04, lfo1_wave:'triangle', _perc: false, _percFeel: 'whisper', _percChar: 'whisper', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 70, _scale: 'major', _root: 'E',
+        _macros: { space: 'plant_smooth' }
       },
 
       // PLUCK — sharp attack, zero sustain, fast arp, dry with light delay
@@ -3466,12 +4130,13 @@
           dly_wet:{ source:'plant_raw', depth:0.5 },           // raw drives delay mix
           seq_prob:{ source:'plant_activity', depth:0.5 },     // activity = more notes
           osc2_level:{ source:'plant_smooth', depth:0.6 },     // voltage crossfades oscillators
-        }, _perc: true, _percFeel: 'pluck', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 95
+        }, _perc: true, _percFeel: 'pluck', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 95, _scale: 'pentatonic', _root: 'A',
+        _macros: { energy: 'plant_activity' }
       },
 
       // WIND — filter-heavy, breathy, LFO-driven movement, barely any attack
       wind: {
-        osc1_wave:'sine', osc2_wave:'sine', osc1_level:0.5, osc2_level:0.2, osc2_detune:3,
+        osc1_wave:'sine', osc2_wave:'fatsine', osc1_level:0.5, osc2_level:0.25, osc2_detune:3, osc2_octave:-1, osc2_spread:8,
         filter_cutoff:400, filter_res:8, filter_env_amt:0,
         amp_a:2, amp_d:3, amp_s:0.4, amp_r:4, amp_level:0.4,
         rev_decay:6, rev_wet:0.6, chr_wet:0.6, chr_rate:0.1,
@@ -3485,7 +4150,8 @@
           osc2_level:{ source:'plant_smooth', depth:-0.4 },    // inverse — one fades as other grows
           chr_wet:{ source:'plant_smooth', depth:0.5 },        // chorus swells with position
           amp_level:{ source:'plant_raw', depth:0.3 },         // volume breathes with signal
-        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 65
+        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 65, _scale: 'dorian', _root: 'D',
+        _macros: { tension: 'plant_smooth' }
       },
 
       // GLASS — inharmonic, high resonance, percussive, lots of space
@@ -3502,27 +4168,39 @@
           rev_wet:{ source:'plant_smooth', depth:0.5 },        // space grows/shrinks
           dly_fb:{ source:'plant_smooth', depth:0.4 },         // echo trails follow position
           osc1_level:{ source:'plant_raw', depth:0.3 },        // brightness shift
-        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 70
+        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 70, _scale: 'wholeTone', _root: 'C',
+        _macros: { space: 'plant_smooth' }
       },
 
-      // ETHEREAL — deep reverb cathedral, slow chorus swirl, very wet
+      // ETHEREAL — vast cathedral, sub-drone below, shimmer above, ghostly echoes
       ethereal: {
-        osc1_wave:'fatsine', osc2_wave:'fatsine', osc1_spread:40, osc2_spread:20,
-        osc2_detune:5, osc2_level:0.3,
-        filter_cutoff:1500, filter_res:0.3, filter_env_amt:0,
-        amp_a:4, amp_d:5, amp_s:0.7, amp_r:10, amp_level:0.4,
-        rev_decay:18, rev_wet:0.9, dly_time:1.0, dly_fb:0.5, dly_wet:0.4,
-        chr_wet:0.7, chr_rate:0.2,
+        // OSC1: deep sub-drone, one octave down, wide detuned sine for foundation
+        osc1_wave:'fatsine', osc1_spread:30, osc1_level:0.5,
+        osc1_octave:-1,
+        // OSC2: high shimmer, two octaves up, quiet sine — like light through stained glass
+        osc2_wave:'sine', osc2_octave:2, osc2_detune:7, osc2_level:0.15, osc2_spread:0,
+        // Filter: open enough for the shimmer to come through
+        filter_cutoff:2500, filter_res:0.5, filter_env_amt:0,
+        // Amp: very slow swell, long sustain, enormous release
+        amp_a:5, amp_d:6, amp_s:0.7, amp_r:12, amp_level:0.4,
+        // Massive space — near-infinite reverb, self-oscillating delay for ghostly trails
+        rev_decay:20, rev_wet:0.9, dly_time:1.2, dly_fb:0.6, dly_wet:0.45,
+        chr_wet:0.4, chr_rate:0.08,
         seq_mode:'drone', seq_prob:0.1,
-        lfo1_rate:0.03, lfo1_depth:0.6,
+        // LFO1: slow panning for spatial movement
+        lfo1_rate:0.025, lfo1_wave:'sine', lfo1_depth:0.5,
+        // LFO2: ultra-slow shimmer volume swell
+        lfo2_rate:0.04, lfo2_wave:'triangle', lfo2_depth:0.4,
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.6 },  // filter drifts with voltage
-          osc1_level:{ source:'plant_smooth', depth:0.4 },     // volume follows position
-          osc2_level:{ source:'plant_raw', depth:0.5 },        // second osc breathes independently
-          chr_wet:{ source:'plant_smooth', depth:0.4 },        // chorus depth from voltage
-          dly_fb:{ source:'plant_raw', depth:0.4 },            // raw controls echo buildup
-          rev_wet:{ source:'plant_smooth', depth:0.3 },        // space shifts
-        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 60
+          filter_cutoff:{ source:'plant_smooth', depth:0.5 },  // brightness drifts with plant
+          osc2_level:{ source:'lfo2', depth:0.5 },             // shimmer swells in and out
+          osc1_level:{ source:'plant_smooth', depth:0.3 },     // sub-drone follows plant
+          pan:{ source:'lfo1', depth:0.6 },                    // slow stereo drift
+          dly_fb:{ source:'plant_raw', depth:0.4 },            // echo trails grow with signal
+          rev_wet:{ source:'plant_smooth', depth:0.2 },        // space shifts subtly
+          chr_wet:{ source:'plant_raw', depth:0.3 },           // chorus breathes
+        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 55, _scale: 'minor', _root: 'A',
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
       },
 
       // ORGANIC — warm, thick, distorted, gritty, like wood and earth
@@ -3542,7 +4220,8 @@
           osc1_level:{ source:'plant_raw', depth:0.3 },        // gentle osc balance
           osc2_level:{ source:'plant_smooth', depth:0.3 },     // second osc crossfade
           filter_res:{ source:'plant_raw', depth:0.3 },        // gentle resonance
-        }, lfo1_rate:0.5, _perc: true, _percFeel: 'organic', _percChar: 'distorted', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 80
+        }, lfo1_rate:0.5, _perc: true, _percFeel: 'organic', _percChar: 'distorted', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 80, _scale: 'dorian', _root: 'G',
+        _macros: { energy: 'plant_activity' }
       },
 
       // SYNTHWAVE — bright, driving, punchy saws + square, classic 80s analog
@@ -3562,7 +4241,8 @@
           dly_wet:{ source:'plant_activity', depth:0.4 },      // activity adds echo
           dist_amt:{ source:'plant_activity', depth:0.3 },     // activity adds warmth
           filter_res:{ source:'plant_smooth', depth:0.3 },     // gentle resonance shift
-        }, lfo1_rate:1.5, _perc: true, _percFeel: 'synthwave', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 110
+        }, lfo1_rate:1.5, _perc: true, _percFeel: 'synthwave', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 110, _scale: 'major', _root: 'C',
+        _macros: { energy: 'plant_activity' }
       },
 
       // CRYSTAL CAVE — sparse, huge reverb + delay, dripping echoes
@@ -3580,39 +4260,52 @@
           rev_wet:{ source:'plant_raw', depth:0.3 },           // reverb follows raw
           osc2_detune:{ source:'plant_smooth', depth:0.6 },    // detuning shifts with position
           osc2_level:{ source:'plant_raw', depth:0.5 },        // second voice fades in/out
-        }, lfo1_rate:0.02, _perc: false, _percFeel: 'calm', _percChar: 'standard', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 65
+        }, lfo1_rate:0.02, _perc: false, _percFeel: 'whisper', _percChar: 'whisper', _melodyEnabled: true, _melodyOctave: 2, _clockBPM: 65, _scale: 'pentatonic', _root: 'F',
+        _macros: { space: 'plant_smooth' }
       },
 
-      // MIDNIGHT — dark, minimal, spacious, restrained
+      // MIDNIGHT — dark, spacious, slow pulse, audible but restrained
       midnight: {
-        osc1_wave:'sine', osc2_wave:'sine', osc2_octave:-1, osc2_level:0.3,
-        osc1_level:0.5,
-        filter_cutoff:600, filter_res:0.5, filter_env_amt:1,
-        amp_a:1.5, amp_d:2, amp_s:0.2, amp_r:4,
-        amp_level:0.45,
-        rev_decay:6, rev_wet:0.3, dly_time:0.8, dly_fb:0.35, dly_wet:0.3,
+        // OSC1: warm triangle for body — not sine (too pure/quiet)
+        osc1_wave:'triangle', osc1_level:0.6, osc1_spread:0,
+        // OSC2: sub-octave sine for deep foundation + fatsine for subtle movement
+        osc2_wave:'fatsine', osc2_octave:-1, osc2_level:0.4, osc2_spread:10, osc2_detune:3,
+        // Filter: 1200Hz lets harmonics through, slight resonance for character
+        filter_cutoff:1200, filter_res:1.5, filter_env_amt:1.5,
+        filter_env_a:0.01, filter_env_d:1.0, filter_env_s:0.4, filter_env_r:3,
+        // Amp: slow swell, decent sustain so you can actually hear the drone
+        amp_a:2, amp_d:3, amp_s:0.5, amp_r:5,
+        amp_level:0.55,
+        // Big spacious delay + reverb — the echoes are the star
+        rev_decay:10, rev_wet:0.45, dly_time:0.8, dly_fb:0.45, dly_wet:0.35,
+        chr_wet:0.15, chr_rate:0.08,
         seq_mode:'drone', seq_prob:0.1,
-        lfo2_rate:0.02, lfo2_wave:'sine', lfo2_depth:0.3,
+        // LFO1: slow pulse on amp — breathing rhythm
+        lfo1_rate:0.06, lfo1_wave:'sine', lfo1_depth:0.4,
+        // LFO2: very slow filter drift
+        lfo2_rate:0.02, lfo2_wave:'triangle', lfo2_depth:0.3,
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.5 },
-          amp_level:{ source:'plant_smooth', depth:0.3 },
-          dly_fb:{ source:'plant_raw', depth:0.2 },
-          dly_wet:{ source:'plant_smooth', depth:0.3 },
-          rev_wet:{ source:'plant_raw', depth:0.2 },
-          osc2_level:{ source:'plant_smooth', depth:0.3 },
-        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 60
+          filter_cutoff:{ source:'plant_smooth', depth:0.5 },   // brightness follows plant
+          filter_res:{ source:'lfo2', depth:0.3 },              // slow resonance drift adds movement
+          amp_level:{ source:'lfo1', depth:0.2 },               // slow breathing pulse
+          osc2_level:{ source:'plant_smooth', depth:0.4 },      // sub presence follows plant
+          dly_fb:{ source:'plant_raw', depth:0.3 },             // echo trails grow with signal
+          dly_wet:{ source:'plant_smooth', depth:0.3 },         // delay depth follows position
+          rev_wet:{ source:'plant_smooth', depth:0.3 },         // space follows plant
+        }, _perc: false, _percFeel: 'calm', _percChar: 'soft', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 60, _scale: 'minor', _root: 'D',
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
       },
 
-      // CIRCUIT — chiptune: clean square waves, zero detune, precise, 8-bit character
+      // CIRCUIT — chiptune: square lead + triangle bass (like NES), 8-bit character
       circuit: {
-        osc1_wave:'square', osc2_wave:'square', osc2_detune:0, osc2_octave:1,
-        osc1_spread:0, osc2_spread:0, osc1_level:0.7, osc2_level:0.4,
+        osc1_wave:'square', osc2_wave:'triangle', osc2_detune:0, osc2_octave:-1,
+        osc1_spread:0, osc2_spread:0, osc1_level:0.7, osc2_level:0.35,
         filter_cutoff:8000, filter_res:1, filter_env_amt:2,
         filter_env_a:0.001, filter_env_d:0.1, filter_env_s:0.3,
         amp_a:0.001, amp_d:0.1, amp_s:0.6, amp_r:0.08, amp_level:0.5,
         dist_amt:0.15, dist_wet:0.3, dly_time:0.18, dly_fb:0.25, dly_wet:0.15,
         rev_wet:0.1, rev_decay:1,
-        seq_mode:'arp', seq_voice:'arp', seq_prob:0.65, seq_gate:0.08,
+        seq_mode:'generative', seq_voice:'poly', seq_prob:0.5, seq_gate:0.12,
         lfo1_rate:8, lfo1_wave:'square', lfo1_depth:0.4,
         _mod:{
           filter_cutoff:{ source:'lfo1', depth:0.5 },          // fast square LFO chops the filter
@@ -3621,38 +4314,79 @@
           seq_prob:{ source:'plant_smooth', depth:0.4 },       // note density from position
           dly_fb:{ source:'plant_raw', depth:0.4 },            // echo from raw
           amp_level:{ source:'plant_smooth', depth:0.3 },      // overall level follows voltage
-        }, _perc: true, _percFeel: 'circuit', _percChar: 'lofi', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 120
+        }, _perc: true, _percFeel: 'circuit', _percChar: 'lofi', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 120, _scale: 'pentatonic', _root: 'C',
+        _macros: { energy: 'plant_activity' }
       },
 
-      // PIANO + CELLO — hammer piano on OSC1, bowed cello sustain on OSC2
+      // PIANO — percussive hammer attack, natural decay, no sustain
       piano: {
-        // OSC1: Piano — triangle, fast attack, natural decay
-        osc1_wave:'triangle', osc1_level:0.65, osc1_spread:0,
-        // OSC2: Cello — triangle one octave down, slow attack, sustained, vibrato from LFO2
-        osc2_wave:'triangle', osc2_octave:-1, osc2_detune:2, osc2_level:0.35, osc2_spread:8,
-        filter_cutoff:3500, filter_res:0.8, filter_env_amt:2.5,
-        filter_env_a:0.001, filter_env_d:0.6, filter_env_s:0.3, filter_env_r:1.5,
-        // Amp envelope is a compromise — piano wants fast attack, cello wants slow
-        // The fast attack serves the piano; OSC2's spread + lower octave gives it a softer onset
-        amp_a:0.005, amp_d:1.5, amp_s:0.4, amp_r:3, amp_level:0.5,
-        rev_decay:7, rev_wet:0.5, dly_time:0.4, dly_fb:0.15, dly_wet:0.12,
-        chr_wet:0.12, chr_rate:0.2,
+        // OSC1: triangle — clean odd harmonics, filter envelope adds hammer brightness
+        // No spread, no detune — clean like a real string
+        osc1_wave:'triangle', osc1_level:0.7, osc1_spread:0, osc1_detune:0,
+        // OSC2: sine at same octave, very quiet — adds body/warmth to the fundamental
+        // NOT a cello, just subtle reinforcement of the piano tone
+        osc2_wave:'sine', osc2_octave:0, osc2_detune:1, osc2_level:0.15, osc2_spread:0,
+        // Filter: the key to piano sound — sharp bright burst (hammer) decaying to warm tone
+        // High env amount (6 octaves), very fast decay (150ms), low sustain
+        filter_cutoff:1200, filter_res:0.3, filter_env_amt:6,
+        filter_env_a:0.001, filter_env_d:0.15, filter_env_s:0.05, filter_env_r:2,
+        // Amp: instant attack, long natural decay (3.5s), near-zero sustain — notes ring then die
+        amp_a:0.001, amp_d:3.5, amp_s:0.02, amp_r:2, amp_level:0.55,
+        // Concert hall — moderate reverb to simulate room, very subtle delay
+        rev_decay:5, rev_wet:0.35, dly_time:0.4, dly_fb:0.1, dly_wet:0.08,
+        chr_wet:0, chr_rate:0, // no chorus — piano is clean
         dist_amt:0, dist_wet:0,
-        seq_mode:'generative', seq_voice:'poly', seq_prob:0.55, seq_gate:1.0,
-        // LFO1: slow drift for filter warmth
-        lfo1_rate:0.04, lfo1_wave:'sine', lfo1_depth:0.2,
-        // LFO2: vibrato on cello (OSC2 detune) — 5Hz like a real bowed vibrato
-        lfo2_rate:5, lfo2_wave:'sine', lfo2_depth:0.4,
+        // Generative — bass/melody/arps play against each other like piano trio
+        seq_mode:'generative', seq_voice:'poly', seq_prob:0.4, seq_gate:0.6,
+        lfo1_rate:0.04, lfo1_wave:'sine', lfo1_depth:0.1,
+        lfo2_rate:0, lfo2_wave:'sine', lfo2_depth:0, // no vibrato — pianos don't vibrate
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.6 },  // brightness follows voltage
-          osc2_level:{ source:'plant_smooth', depth:0.5 },     // plant controls cello volume — swells in/out
-          osc2_detune:{ source:'lfo2', depth:0.25 },           // vibrato — LFO2 wobbles the cello pitch
-          rev_wet:{ source:'plant_smooth', depth:0.4 },        // space grows with voltage
-          dly_wet:{ source:'plant_raw', depth:0.3 },           // delay from raw
-          seq_prob:{ source:'plant_activity', depth:0.4 },     // activity = more notes
+          filter_cutoff:{ source:'plant_smooth', depth:0.4 },  // brightness follows voltage
+          osc2_level:{ source:'plant_smooth', depth:0.3 },     // body warmth follows plant
+          rev_wet:{ source:'plant_smooth', depth:0.3 },        // space grows with voltage
+          dly_wet:{ source:'plant_activity', depth:0.2 },      // subtle echo on activity
+          amp_level:{ source:'plant_smooth', depth:0.2 },      // gentle dynamics
         },
         _perc: false, _percFeel: 'calm', _percChar: 'soft',
-        _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 72
+        _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 72, _scale: 'major', _root: 'G',
+        _macros: { space: 'plant_smooth', energy: 'plant_activity' }
+      },
+
+      // LO-FI — chill beats, jazzy detuned keys, warm bitcrushed character
+      lofi: {
+        // OSC1: warm detuned triangle keys — the classic lo-fi Rhodes sound
+        osc1_wave:'triangle', osc1_level:0.6, osc1_spread:12, osc1_detune:4,
+        // OSC2: sine sub layer one octave down for weight
+        osc2_wave:'sine', osc2_octave:-1, osc2_level:0.25, osc2_spread:0, osc2_detune:0,
+        // Filter: warm and rolled off, gentle envelope for key pluck
+        filter_cutoff:1800, filter_res:1.2, filter_env_amt:2,
+        filter_env_a:0.005, filter_env_d:0.5, filter_env_s:0.3, filter_env_r:1,
+        // Amp: medium attack (not too sharp), good sustain for chords
+        amp_a:0.02, amp_d:1.2, amp_s:0.5, amp_r:2, amp_level:0.5,
+        // Warm reverb, dotted-eighth delay, subtle chorus for width
+        rev_decay:5, rev_wet:0.35,
+        dly_time:0.43, dly_fb:0.3, dly_wet:0.2,
+        chr_wet:0.25, chr_rate:0.3,
+        // Subtle warmth from distortion (like tape saturation)
+        dist_amt:0.08, dist_wet:0.4,
+        seq_mode:'generative', seq_voice:'poly', seq_prob:0.45, seq_gate:0.6,
+        // LFO1: slow wobble on filter — vinyl warble feel
+        lfo1_rate:0.3, lfo1_wave:'sine', lfo1_depth:0.3,
+        // LFO2: very slow detune drift — tape speed variation
+        lfo2_rate:0.08, lfo2_wave:'triangle', lfo2_depth:0.2,
+        _mod:{
+          filter_cutoff:{ source:'plant_smooth', depth:0.5 },   // brightness follows plant
+          osc1_detune:{ source:'lfo2', depth:0.15 },            // subtle pitch drift like old tape
+          osc1_level:{ source:'plant_smooth', depth:0.3 },      // volume breathes
+          rev_wet:{ source:'plant_smooth', depth:0.3 },         // space follows plant
+          dly_wet:{ source:'plant_activity', depth:0.4 },       // activity adds echo
+          chr_wet:{ source:'plant_raw', depth:0.3 },            // chorus from raw
+          dist_amt:{ source:'plant_activity', depth:0.2 },      // more grit when active
+        },
+        _perc: true, _percFeel: 'lofi', _percChar: 'lofi',
+        _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 70, _scale: 'minor', _root: 'E',
+        _macros: { energy: 'plant_activity', space: 'plant_smooth' },
+        _vinyl: 0.65
       },
     };
 
@@ -3682,12 +4416,22 @@
         btn.classList.toggle('active', btn.dataset.preset === name);
       });
 
-      // Kill ALL sound immediately — hard stop, no release tail
+      // Kill ALL sound immediately — hard stop, no release tail, flush effects
       try {
         if (osc1Synth) { osc1Synth.set({ envelope: { release: 0.01 } }); osc1Synth.releaseAll(); }
         if (osc2Synth) { osc2Synth.set({ envelope: { release: 0.01 } }); osc2Synth.releaseAll(); }
         if (subBassSynth) { subBassSynth.set({ envelope: { release: 0.01 } }); subBassSynth.triggerRelease(); }
         if (bassSynth) { bassSynth.set({ envelope: { release: 0.01 } }); bassSynth.triggerRelease(); }
+        // Flush delay and reverb tails so they don't bleed into the next preset
+        if (delayNode) { delayNode.wet.value = 0; delayNode.feedback.value = 0; }
+        if (reverbNode) { reverbNode.wet.value = 0; }
+        if (chorusNode) { chorusNode.wet.value = 0; }
+        // Restore effect levels after a brief silence (applySynthParams will set correct values)
+        setTimeout(() => {
+          if (delayNode) delayNode.wet.rampTo(SYNTH_PARAMS.dly_wet.value, 0.1);
+          if (reverbNode) reverbNode.wet.rampTo(SYNTH_PARAMS.rev_wet.value, 0.1);
+          if (chorusNode) chorusNode.wet.rampTo(SYNTH_PARAMS.chr_wet.value, 0.1);
+        }, 150);
       } catch(_) {}
       droneNotes = [];
       melodyPhrase = []; melodyPhraseIdx = 0;
@@ -3758,15 +4502,7 @@
       // Apply percussion state from preset
       if (preset._perc !== undefined) {
         percEnabled = preset._perc;
-        ['percToggle', 'percToggleInline'].forEach(id => {
-          const btn = document.getElementById(id);
-          if (btn) { btn.textContent = percEnabled ? 'ON' : 'OFF'; btn.classList.toggle('on', percEnabled); }
-        });
-        const sec = document.getElementById('percSection');
-        if (sec) {
-          if (!percEnabled) { sec.style.display = 'none'; }
-          else { sec.style.display = ''; sec.classList.add('active'); sec.classList.remove('perc-off'); }
-        }
+        syncPercUI();
         if (!percEnabled) percStep = 0;
       }
       // Apply feel and character, rebuild synths to change percussion sound
@@ -3793,6 +4529,23 @@
         const ts = document.getElementById('tempoSlider'); if (ts) ts.value = clockBPM;
         const tv = document.getElementById('tempoVal'); if (tv) tv.textContent = clockBPM + 'bpm';
       }
+
+      // Apply preset scale and root
+      if (preset._scale) {
+        const scaleSel = document.getElementById('scaleSelect');
+        if (scaleSel) { scaleSel.value = preset._scale; }
+      }
+      if (preset._root) {
+        const rootSel = document.getElementById('rootSelect');
+        if (rootSel) { rootSel.value = preset._root; }
+      }
+      if (preset._scale || preset._root) buildNotePool();
+
+      // Apply macros
+      activeMacros = preset._macros ? { ...preset._macros } : {};
+
+      // Vinyl noise layer
+      if (vinylGain) vinylGain.gain.rampTo(preset._vinyl || 0, 0.3);
 
       // Restart drone if in drone mode and playing
       if (musicPlaying && SYNTH_PARAMS.seq_mode.value === 'drone') {
@@ -3824,6 +4577,7 @@
         melodyCooldown: melodyCooldownSec,
         xyAxisSource: { ...xyAxisSource },
         xySnapshots: JSON.parse(JSON.stringify(xySnapshots)),
+        activeMacros: { ...activeMacros },
       };
       Object.keys(SYNTH_PARAMS).forEach(k => { state.params[k] = SYNTH_PARAMS[k].value; });
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
@@ -3864,10 +4618,7 @@
         // Restore percussion state
         if (state.percEnabled !== undefined) {
           percEnabled = state.percEnabled;
-          const btn = document.getElementById('percToggle');
-          if (btn) { btn.textContent = percEnabled ? 'ON' : 'OFF'; btn.classList.toggle('on', percEnabled); }
-          const sec = document.getElementById('percSection');
-          if (sec) sec.classList.toggle('perc-off', !percEnabled);
+          syncPercUI();
         }
         if (state.percVolume != null) { percVolume = state.percVolume; const el = document.getElementById('percVol'); if (el) el.value = Math.round(percVolume * 100); }
         if (state.percSwing != null) { percSwingAmt = state.percSwing; const el = document.getElementById('percSwing'); if (el) el.value = Math.round(percSwingAmt * 100); }
@@ -3911,6 +4662,7 @@
             if (el) el.classList.toggle('saved', !!xySnapshots[c]);
           });
         }
+        if (state.activeMacros) activeMacros = { ...state.activeMacros };
 
         buildNotePool();
         updateAllKnobVisuals();
@@ -4061,7 +4813,7 @@
             fill: false,
             yAxisID: 'y',
           },
-          // Ch2 — Clips B
+          // Ch2 — Clips B (hidden until v2 hardware)
           {
             label: 'Clips B Raw (mV)',
             data: chState.ch2.rawHistory,
@@ -4072,6 +4824,7 @@
             tension: 0.3,
             fill: true,
             yAxisID: 'y',
+            hidden: true,
           },
           {
             label: 'Clips B Smooth',
@@ -4083,8 +4836,9 @@
             tension: 0.4,
             fill: false,
             yAxisID: 'y',
+            hidden: true,
           },
-          // Ch3 — TENS Pads
+          // Ch3 — TENS Pads (hidden until v2 hardware)
           {
             label: 'TENS Raw (mV)',
             data: chState.ch3.rawHistory,
@@ -4095,6 +4849,7 @@
             tension: 0.3,
             fill: true,
             yAxisID: 'y',
+            hidden: true,
           },
           {
             label: 'TENS Smooth',
@@ -4106,6 +4861,7 @@
             tension: 0.4,
             fill: false,
             yAxisID: 'y',
+            hidden: true,
           },
         ],
       },
@@ -4141,6 +4897,7 @@
               font: { family: 'SF Mono, monospace', size: 12 },
               usePointStyle: true,
               pointStyle: 'line',
+              filter: (item) => !item.hidden,
             },
           },
           tooltip: {
@@ -4167,18 +4924,24 @@
       }
     }
 
+    let lastDataTime = 0;
+    let sseWatchdog = null;
+
     function connect() {
       setStatus('connecting');
       eventSource = new EventSource('/api/stream');
+      lastDataTime = Date.now();
 
       eventSource.onopen = () => {
         setStatus('connected');
+        lastDataTime = Date.now();
         document.getElementById('connectBtn').textContent = 'Disconnect';
         document.getElementById('connectBtn').style.display = 'inline-block';
         document.getElementById('connectBtn').classList.add('active');
       };
 
       eventSource.onmessage = (event) => {
+        lastDataTime = Date.now();
         try {
           const msg = JSON.parse(event.data);
           if (msg.ch && msg.v !== undefined) {
@@ -4186,7 +4949,6 @@
             return;
           }
         } catch(e) {}
-        // Fallback: plain float (legacy single-channel)
         const value = parseFloat(event.data);
         if (!isNaN(value)) {
           handleSensorData({ id: 'sensor-plant_signal', channel: 'ch1', value });
@@ -4198,11 +4960,25 @@
           setStatus('disconnected');
           document.getElementById('connectBtn').textContent = 'Connect';
           document.getElementById('connectBtn').classList.remove('active');
+          // Auto-reconnect after 2 seconds
+          setTimeout(() => { if (!eventSource || eventSource.readyState === EventSource.CLOSED) connect(); }, 2000);
         } else {
           setStatus('error');
-          // EventSource auto-reconnects
         }
       };
+
+      // Watchdog — if no data received for 10 seconds, force reconnect
+      if (sseWatchdog) clearInterval(sseWatchdog);
+      sseWatchdog = setInterval(() => {
+        if (!eventSource) return;
+        const staleness = Date.now() - lastDataTime;
+        if (staleness > 10000) {
+          console.log('[PlantPulse] SSE stale for', staleness, 'ms — reconnecting');
+          try { eventSource.close(); } catch(_){}
+          eventSource = null;
+          connect();
+        }
+      }, 3000);
     }
 
     function disconnect() {
