@@ -1833,6 +1833,14 @@
     const SECTION_SPIKE_MULTIPLIER = 3.0; // bar must be 3x recent avg to trigger
     const VOICE_ACTIVE_THRESHOLD = 0.05;  // voices below this are considered silent
 
+    // Track lifecycle state
+    // A "track" is one motif's lifetime. After _track.minDuration seconds, at the
+    // next section wrap (back to section 0), we regenerate the motif + bass riff
+    // so the music evolves like separate tracks on an album.
+    // Ambient presets without _track just run forever on the initial motif.
+    let trackStartTime = 0;
+    let trackNumber = 1;
+
     // Per-tick smoothing — called from musicTick
     function smoothVoiceLevels() {
       for (const v in voiceLevels) {
@@ -1940,7 +1948,64 @@
           `%cshift=${section.octaveShift||0} boost=${section.percBoost||1} accent=${accent}`,
           'color:#f472b6;font-weight:bold;font-size:13px', 'color:#fbbf24', 'color:#8896b0', 'color:#60a5fa'
         );
+
+        // === TRACK LIFECYCLE CHECK ===
+        // If preset has a _track config and we've played long enough, regenerate
+        // the motif + bass riff to start a "new track" with fresh DNA.
+        // Triggers on natural section wrap (back to index 0) past minDuration,
+        // or force-fires if maxDuration exceeded regardless of section index.
+        maybeEndTrack();
       }
+    }
+
+    // Regenerates the motif and bass riff from current plant state, resets the
+    // track timer, and logs the new track number. Called from updateArrangementSection
+    // when the track duration threshold has been met. If the preset declares a
+    // rootPool, the key rotates through it — modulating between tracks like an album.
+    let rootPoolIdx = 0;
+    function maybeEndTrack() {
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const track = preset && preset._track;
+      if (!track) return;  // ambient presets have no _track, never end
+      const elapsed = (Date.now() - trackStartTime) / 1000;
+      // Wrap-to-intro means: section index just became 0
+      const wrappedToIntro = (currentSectionIdx === 0);
+      const pastMin = elapsed >= track.minDuration;
+      const pastMax = elapsed >= track.maxDuration;
+      if (!(pastMax || (pastMin && wrappedToIntro))) return;
+
+      trackNumber += 1;
+      trackStartTime = Date.now();
+      const prevIntervals = currentMotif ? currentMotif.intervals.slice() : [];
+      const prevRoot = document.getElementById('rootSelect')?.value || '?';
+
+      // Rotate the key if the preset defines a rootPool
+      let newRoot = prevRoot;
+      if (track.rootPool && track.rootPool.length > 0) {
+        rootPoolIdx = (rootPoolIdx + 1) % track.rootPool.length;
+        newRoot = track.rootPool[rootPoolIdx];
+        const rootSel = document.getElementById('rootSelect');
+        if (rootSel) rootSel.value = newRoot;
+        buildNotePool(); // rebuild scale notes in the new key
+      }
+
+      // Now regenerate motif/riff — they'll sample from the new (possibly transposed) state
+      currentMotif = generateMotif();
+      currentBassRiff = generateBassRiff();
+
+      // Force section back to 0 if maxDuration forced the end mid-cycle
+      if (pastMax && !wrappedToIntro) {
+        currentSectionIdx = 0;
+        sectionBarCount = 0;
+      }
+      const keyChange = (newRoot !== prevRoot) ? ` %c[${prevRoot} → ${newRoot}]` : '';
+      const keyColor = 'color:#f472b6;font-weight:bold';
+      console.log(
+        `%c━━━ [track ${trackNumber}] %cnew motif for ${currentPresetName} ` +
+        `%cintervals=[${currentMotif.intervals.join(',')}] ` +
+        `%c(was [${prevIntervals.join(',')}], elapsed ${Math.round(elapsed)}s)` + keyChange,
+        'color:#fbbf24;font-weight:bold;font-size:14px', 'color:#a78bfa;font-weight:bold', 'color:#34d399', 'color:#8896b0', keyColor
+      );
     }
 
     // Reset section state when a preset loads
@@ -2130,6 +2195,24 @@
             oscillator: { type: cfg.wave || 'sawtooth' },
             envelope,
             filterEnvelope: cfg.filterEnv || defaultFiltEnv,
+          },
+        });
+      } else if (cfg.type === 'fm') {
+        // FM synth — classic DX7-style sound. Great for electric piano, bells, plucks.
+        // The KEY to piano character is modulationEnvelope.decay being SHORT —
+        // the modulator fades fast, giving a bright hammer attack that decays to a
+        // warm sine sustain. That's the classic "FM piano" sound.
+        synth = new Tone.PolySynth(Tone.FMSynth, {
+          maxPolyphony: cfg.maxPolyphony || 6,
+          options: {
+            harmonicity: cfg.harmonicity ?? 3,
+            modulationIndex: cfg.modulationIndex ?? 10,
+            oscillator: { type: cfg.wave || 'sine' },
+            modulation: { type: cfg.modWave || 'sine' },
+            envelope,
+            modulationEnvelope: cfg.modEnvelope || {
+              attack: 0.002, decay: 0.2, sustain: 0, release: 0.3,
+            },
           },
         });
       } else {
@@ -5488,6 +5571,7 @@
         },
         _drumKit: 'tight_modern', _drummer: 'the_rocker',
         _drumHumanize: 0.4,
+        _track: { minDuration: 360, maxDuration: 540, rootPool: ['G', 'D', 'A', 'C'] },  // default, 6-9 min, fifths + subdominant
         _arrangement: {
           minBars: 12, maxBars: 20,
           sections: [
@@ -5525,6 +5609,7 @@
         _macros: { space: 'plant_activity', energy: 'plant_smooth' },
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0.3,
+        _track: { minDuration: 360, maxDuration: 600, rootPool: ['C', 'G', 'F', 'D'] },  // bells, 6-10 min, bright major family
         // Bells — short phrases, sparkle variations
         _arrangement: {
           minBars: 8, maxBars: 16,
@@ -5607,6 +5692,7 @@
         _macros: { energy: 'plant_activity' },
         _drumKit: 'tight_modern', _drummer: 'the_rocker',
         _drumHumanize: 0.2,
+        _track: { minDuration: 300, maxDuration: 480, rootPool: ['A', 'E', 'D', 'G'] },  // pluck, 5-8 min, lively pentatonic fifths
         // Pluck — bouncy arp with tight arrangement
         _arrangement: {
           minBars: 8, maxBars: 16,
@@ -5790,8 +5876,9 @@
           filter_res:{ source:'plant_raw', depth:0.3 },        // gentle resonance
         }, lfo1_rate:0.5, _perc: true, _percFeel: 'organic', _percChar: 'distorted', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 80, _scale: 'dorian', _root: 'G',
         _macros: { energy: 'plant_activity' },
-        _drumKit: 'bitcrushed_lofi', _drummer: 'the_cat',
+        _drumKit: 'tight_modern', _drummer: 'the_cat',
         _drumHumanize: 0.9,
+        _track: { minDuration: 360, maxDuration: 600, rootPool: ['G', 'D', 'A', 'E'] },  // organic, 6-10 min, dorian fifths
         // Organic — bluesy rotation with drum style changes per section
         _arrangement: {
           minBars: 8, maxBars: 16,
@@ -5803,15 +5890,15 @@
           ],
         },
         _instruments: {
-          // Lead — fat distorted sawtooth, warm and gritty
-          lead: { type: 'poly', wave: 'fatsawtooth', spread: 18, envelope: { attack: 0.02, decay: 0.5, sustain: 0.5, release: 0.8 }, cutoff: 2000, res: 2.5, distAmt: 0.15, level: 0.6 },
+          // Lead — fat sawtooth, warm but clean (dist comes from shared macro)
+          lead: { type: 'poly', wave: 'fatsawtooth', spread: 18, envelope: { attack: 0.02, decay: 0.5, sustain: 0.5, release: 0.8 }, cutoff: 2000, res: 2.0, level: 0.55 },
           // Pad — warm fattriangle, rich harmonics
-          pad:  { type: 'poly', wave: 'fattriangle', spread: 15, envelope: { attack: 0.8, decay: 1.0, sustain: 0.7, release: 2.5 }, cutoff: 1400, res: 1.0, level: 0.45 },
-          // Bass — dirty mono-sawtooth, deep filter punch
+          pad:  { type: 'poly', wave: 'fattriangle', spread: 15, envelope: { attack: 0.8, decay: 1.0, sustain: 0.7, release: 2.5 }, cutoff: 1400, res: 1.0, level: 0.4 },
+          // Bass — clean mono-sawtooth, deep filter punch — lets the kick be the low-end anchor
           bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 3, envelope: { attack: 0.003, decay: 0.4, sustain: 0.7, release: 0.6 },
-                  filterEnv: { attack: 0.005, decay: 0.3, sustain: 0.4, release: 0.5, baseFrequency: 80, octaves: 2.0 }, cutoff: 500, res: 2.0, distAmt: 0.1, level: 0.7 },
-          // Arp — gritty fatsawtooth plucks
-          arp:  { type: 'poly', wave: 'fatsawtooth', spread: 10, envelope: { attack: 0.005, decay: 0.25, sustain: 0, release: 0.4 }, cutoff: 3500, res: 2.0, distAmt: 0.08, level: 0.5 },
+                  filterEnv: { attack: 0.005, decay: 0.3, sustain: 0.4, release: 0.5, baseFrequency: 80, octaves: 2.0 }, cutoff: 500, res: 1.5, level: 0.65 },
+          // Arp — fatsawtooth plucks, no per-instrument dist
+          arp:  { type: 'poly', wave: 'fatsawtooth', spread: 10, envelope: { attack: 0.005, decay: 0.25, sustain: 0, release: 0.4 }, cutoff: 3500, res: 1.8, level: 0.5 },
           // Fill — soft fattriangle melodic fills
           fill: { type: 'poly', wave: 'fattriangle', spread: 8, envelope: { attack: 0.05, decay: 0.6, sustain: 0.4, release: 1.2 }, cutoff: 2400, res: 1.2, level: 0.45 },
         },
@@ -5838,6 +5925,7 @@
         _macros: { energy: 'plant_activity' },
         _drumKit: 'linndrum', _drummer: 'the_machine',
         _drumHumanize: 0,
+        _track: { minDuration: 300, maxDuration: 480, rootPool: ['C', 'G', 'F', 'A'] },  // synthwave, 5-8 min, 80s-friendly modulations
         // Synth Wave — tight song structure with classic 80s dynamics
         _arrangement: {
           minBars: 8, maxBars: 16,
@@ -5996,6 +6084,7 @@
         _macros: { energy: 'plant_activity' },
         _drumKit: 'chiptune', _drummer: 'the_machine',
         _drumHumanize: 0,
+        _track: { minDuration: 240, maxDuration: 360, rootPool: ['C', 'G', 'D', 'F'] },  // circuit, 4-6 min, game music pentatonic
         // Circuit — tight chiptune structure, mechanical 8-bit
         _arrangement: {
           minBars: 8, maxBars: 16,
@@ -6053,11 +6142,12 @@
           dly_wet:{ source:'plant_activity', depth:0.2 },      // subtle echo on activity
           amp_level:{ source:'plant_smooth', depth:0.2 },      // gentle dynamics
         },
-        _perc: false, _percFeel: 'calm', _percChar: 'soft',
+        _perc: true, _percFeel: 'calm', _percChar: 'soft',
         _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 72, _scale: 'major', _root: 'G',
         _macros: { space: 'plant_smooth', energy: 'plant_activity' },
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0.3,
+        _track: { minDuration: 420, maxDuration: 720, rootPool: ['G', 'D', 'C', 'A'] },  // piano, 7-12 min, classical fifths
         // Song structure: ambient pianist watching a plant grow
         // 8 bars min / 20 bars max per section — ~27-67 seconds at 72 BPM
         // Rolling 20-bar activity baseline; spike = current bar > 3x recent avg
@@ -6075,27 +6165,31 @@
           ],
         },
         _instruments: {
-          // PIANO IDENTITY: strings. Real piano lives in the 100-1500 Hz body range, not
-          // synth-lead territory. Poly-mono gives us per-note filter envelopes so each
-          // note has a HAMMER attack (bright) that decays to a warm BODY (dark). That's
-          // what separates piano spectrally from synthwave/circuit's high-mid leads.
-          // Lead — poly-mono triangle with aggressive filter envelope (hammer → body)
-          lead: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 6,
-                  envelope: { attack: 0.001, decay: 2.8, sustain: 0.02, release: 2.0 },
-                  filterEnv: { attack: 0.001, decay: 0.18, sustain: 0.05, release: 1.5,
-                               baseFrequency: 350, octaves: 4.2 },
-                  cutoff: 2200, res: 0.3, level: 0.68 },
-          // Pad — sine at LOW cutoff — warm cello body, very different from ethereal's shimmer
-          pad:  { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.5, sustain: 0.7, release: 3.0 }, cutoff: 900, res: 0.3, level: 0.38 },
-          // Bass — deep muffled piano bass, very low cutoff (real piano bass is dark)
-          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 3,
-                  envelope: { attack: 0.001, decay: 2.5, sustain: 0.05, release: 1.5 },
-                  filterEnv: { attack: 0.001, decay: 0.25, sustain: 0.15, release: 1.5, baseFrequency: 55, octaves: 3.0 },
-                  cutoff: 350, res: 0.3, level: 0.55 },
-          // Arp — short triangle, warmer than synthwave/circuit arps
-          arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.7 }, cutoff: 2800, res: 0.6, level: 0.45 },
-          // Fill — soft sine body fills (cello-like, not triangle)
-          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.02, decay: 0.8, sustain: 0.25, release: 1.3 }, cutoff: 1400, res: 0.4, level: 0.42 },
+          // PIANO IDENTITY: FM synthesis — classic DX7 electric piano. The modulation
+          // envelope decays fast so each note gets a bright hammer attack that fades to
+          // a warm sine sustain. That IS the "piano" feel; filtered triangles can't do it.
+          // Lead — FM piano. harmonicity=3 gives inharmonic "bite" like real strings.
+          lead: { type: 'fm', maxPolyphony: 6,
+                  harmonicity: 3, modulationIndex: 12,
+                  envelope: { attack: 0.001, decay: 3.2, sustain: 0.08, release: 2.5 },
+                  modEnvelope: { attack: 0.001, decay: 0.25, sustain: 0, release: 0.4 },
+                  cutoff: 8000, res: 0.4, level: 0.62 },
+          // Pad — sustained sine for cello-like body underneath the piano
+          pad:  { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.5, sustain: 0.7, release: 3.0 }, cutoff: 900, res: 0.3, level: 0.35 },
+          // Bass — FM piano bass too (matches lead character in lower register)
+          bass: { type: 'fm', maxPolyphony: 3,
+                  harmonicity: 2, modulationIndex: 8,
+                  envelope: { attack: 0.001, decay: 3.0, sustain: 0.06, release: 1.8 },
+                  modEnvelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.5 },
+                  cutoff: 3500, res: 0.4, level: 0.55 },
+          // Arp — FM sparkle, shorter than lead
+          arp:  { type: 'fm', maxPolyphony: 6,
+                  harmonicity: 3, modulationIndex: 10,
+                  envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 0.6 },
+                  modEnvelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.2 },
+                  cutoff: 8000, res: 0.5, level: 0.45 },
+          // Fill — soft sine body fills between piano phrases
+          fill: { type: 'poly', wave: 'sine', envelope: { attack: 0.02, decay: 0.8, sustain: 0.25, release: 1.3 }, cutoff: 1400, res: 0.4, level: 0.4 },
         },
       },
 
@@ -6135,6 +6229,7 @@
         _macros: { energy: 'plant_activity', space: 'plant_smooth' },
         _drumKit: 'bitcrushed_lofi', _drummer: 'the_cat',
         _drumHumanize: 1.0,
+        _track: { minDuration: 480, maxDuration: 720, rootPool: ['E', 'A', 'C', 'G'] },  // lofi, 8-12 min, chill minor/major mix
         _vinyl: 0.65,
         // Lo-Fi — long chill sections, jazzy skip-beat feel in some sections
         _arrangement: {
@@ -6369,6 +6464,11 @@
         currentMotif = null;
         currentBassRiff = null;
       }
+
+      // Reset track lifecycle — new preset = track 1, timer starts now
+      trackNumber = 1;
+      trackStartTime = Date.now();
+      rootPoolIdx = 0; // back to first key in the pool
 
       // Vinyl noise layer
       if (vinylGain) vinylGain.gain.rampTo(preset._vinyl || 0, 0.3);
