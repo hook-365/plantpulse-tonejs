@@ -117,6 +117,12 @@ def history():
     return send_from_directory("static", "history.html")
 
 
+@app.route("/stream")
+def stream_view():
+    """Broadcast view — fullscreen OBS browser source, no controls."""
+    return send_from_directory("static", "stream.html")
+
+
 @app.route("/config.json")
 def config():
     """Serve plant config (no credentials)."""
