@@ -1824,6 +1824,21 @@
       'gen-arp': 1.0, 'gen-mel': 1.0, 'seq-arp': 1.0,
     };
     let voiceLevelsTarget = { ...voiceLevels };
+    // Section-driven base targets — set by section transitions.
+    // voiceLevelsTarget is then computed per-tick from these PLUS plant activity modulation.
+    let sectionVoiceLevels = { ...voiceLevels };
+
+    // How each voice responds to plant activity. Positive = promoted when active,
+    // negative = dimmed when active. This makes the plant a CONDUCTOR that decides
+    // who's prominent at any moment.
+    const VOICE_ACTIVITY_SENSITIVITY = {
+      melody:     -0.12,  // lead dims slightly when active → makes room for fills/arps
+      'gen-bass':  0,     // bass stays steady
+      'gen-arp':   0.35,  // arps come alive when the plant is active
+      'gen-mel':   0.30,  // fills promoted when active → call-and-response with lead
+      'seq-arp':   0.35,  // arp mode also promoted
+      drone:      -0.08,  // drone dims slightly
+    };
 
     // Section state
     let currentSectionIdx = 0;
@@ -1846,10 +1861,19 @@
 
     // Per-tick smoothing — called from musicTick
     function smoothVoiceLevels() {
+      // Compute voiceLevelsTarget from section targets + plant activity modulation.
+      // This is the "plant as conductor" — active plant promotes fills/arps,
+      // dims the lead to make room, quiet plant defers to section's intent.
+      const actNorm = Math.min(1, currentActivity / 50); // 0-1, caps at 50% activity
+      for (const v in voiceLevels) {
+        const base = sectionVoiceLevels[v] ?? 1.0;
+        const sens = VOICE_ACTIVITY_SENSITIVITY[v] || 0;
+        voiceLevelsTarget[v] = Math.max(0, Math.min(1, base + sens * actNorm));
+      }
+      // Ramp toward target
       for (const v in voiceLevels) {
         const target = voiceLevelsTarget[v];
         voiceLevels[v] += (target - voiceLevels[v]) * 0.06; // ~500ms to 90%
-        // Snap to zero when close, so the "< 0.05" gate reliably silences voices
         if (Math.abs(voiceLevels[v] - target) < 0.005) voiceLevels[v] = target;
       }
     }
@@ -2010,7 +2034,7 @@
         // Set targets — smoothing ramps voiceLevels to match
         for (const voice in section.voices) {
           if (voiceLevelsTarget[voice] !== undefined) {
-            voiceLevelsTarget[voice] = section.voices[voice];
+            sectionVoiceLevels[voice] = section.voices[voice];
           }
         }
 
@@ -2170,6 +2194,7 @@
       for (const voice in voiceLevels) {
         voiceLevels[voice] = 1.0;
         voiceLevelsTarget[voice] = 1.0;
+        sectionVoiceLevels[voice] = 1.0;
       }
       const preset = FACTORY_PRESETS[currentPresetName];
       const arr = preset && preset._arrangement;
@@ -2179,7 +2204,7 @@
         for (const voice in section.voices) {
           if (voiceLevels[voice] !== undefined) {
             voiceLevels[voice] = section.voices[voice];
-            voiceLevelsTarget[voice] = section.voices[voice];
+            sectionVoiceLevels[voice] = section.voices[voice];
           }
         }
       } else {
@@ -2222,7 +2247,7 @@
       'seq-arp': 'arp',
       'gen-mel': 'fill',
     };
-    const INSTRUMENT_ROLES = ['lead', 'pad', 'bass', 'arp', 'fill'];
+    const INSTRUMENT_ROLES = ['lead', 'lead_active', 'pad', 'bass', 'arp', 'fill'];
 
     function buildSynthGraph() {
       // Stereo enhancement chain: masterGain → lowShelf → stereoWidener → destination
@@ -2666,7 +2691,21 @@
         if (roleInst) {
           // Role path: each instrument has its own panner on its insert chain
           if (roleInst.panner) roleInst.panner.pan.rampTo(panVal, 0.05);
-          roleInst.triggerAttackRelease(note, duration, undefined, humanVel);
+
+          // Dual-lead crossfade: if a `lead_active` instrument exists AND this is
+          // the melody voice, crossfade between the calm lead and the active lead
+          // based on plant activity. Calm plant = pure lead. Active plant = lead_active
+          // swells in, lead dims slightly. The plant literally drives which instrument
+          // plays the melody.
+          const activeInst = (role === 'lead') ? instruments.lead_active : null;
+          if (activeInst) {
+            const actBlend = Math.min(1, currentActivity / 50); // 0-1
+            if (activeInst.panner) activeInst.panner.pan.rampTo(panVal, 0.05);
+            roleInst.triggerAttackRelease(note, duration, undefined, humanVel * (1 - actBlend * 0.4));
+            activeInst.triggerAttackRelease(note, duration, undefined, humanVel * actBlend * 0.85);
+          } else {
+            roleInst.triggerAttackRelease(note, duration, undefined, humanVel);
+          }
         } else {
           // Legacy path: shared osc1/osc2 through synthPanner
           if (synthPanner) synthPanner.pan.rampTo(panVal, 0.05);
@@ -3183,18 +3222,25 @@
       { name: 'sparse',   steps: [0, 6, 8, 14] },
       // 5: Driving four-on-floor bass
       { name: 'driving',  steps: [0, 4, 8, 12] },
+      // 6: Chiptune NES-style — triangle-channel bass: root-octave jumps on
+      //    quarters + a 16th pickup before the next beat. Very Super Mario.
+      { name: 'chiptune', steps: [0, 4, 7, 8, 12, 15] },
     ];
 
     function generateBassRiff() {
       if (!currentMotif || !currentMotif.intervals || currentMotif.intervals.length === 0) return null;
-      // Pick a template — biased by percFeel so synthwave/organic/lofi feel different
+      // Pick a template — each track preset gets a UNIQUE rhythm template so
+      // no two presets ever play the same bass rhythm.
       let templateIdx = 0;
-      if (percFeel === 'synthwave' || percFeel === 'circuit') templateIdx = 0; // sweet
-      else if (percFeel === 'pluck')                          templateIdx = 1; // pulse
-      else if (percFeel === 'organic')                        templateIdx = 2; // billie
-      else if (percFeel === 'lofi')                           templateIdx = 4; // sparse
-      else if (percFeel === 'groovy')                         templateIdx = 3; // skip
-      else                                                    templateIdx = Math.floor(Math.random() * BASS_RIFF_TEMPLATES.length);
+      // Preset-specific first (overrides percFeel for unique assignment)
+      if (currentPresetName === 'piano')      templateIdx = 5; // driving — piano trio walking quarters
+      else if (percFeel === 'synthwave')      templateIdx = 0; // sweet — 80s syncopation
+      else if (percFeel === 'circuit')        templateIdx = 6; // chiptune — NES triangle bass
+      else if (percFeel === 'pluck')          templateIdx = 1; // pulse — straight 8ths
+      else if (percFeel === 'organic')        templateIdx = 2; // billie — quarters + pickup
+      else if (percFeel === 'lofi')           templateIdx = 4; // sparse — half-time pocket
+      else if (percFeel === 'groovy')         templateIdx = 3; // skip — default groove
+      else                                    templateIdx = Math.floor(Math.random() * BASS_RIFF_TEMPLATES.length);
       const tmpl = BASS_RIFF_TEMPLATES[templateIdx];
       // Store steps + pitches SEPARATELY so we can rotate pitches per-bar
       // without rebuilding the structure each time.
@@ -3391,7 +3437,16 @@
         const MAX_MELODY_MIDI = 79; // G5
         const MIN_MELODY_MIDI = 55; // G3
         for (let i = 0; i < motif.intervals.length; i++) {
-          const noteIdx = Math.max(shiftedRangeStart, Math.min(shiftedRangeEnd, shiftedBase + motif.intervals[i]));
+          // Raw target — can exceed the range
+          let rawIdx = shiftedBase + motif.intervals[i];
+          // WRAP overflow by octaves instead of CLAMPING to the ceiling.
+          // Previous clamp caused "ceiling pile-up" where every high-reaching
+          // motif interval collapsed to the same top note (e.g. piano in G major
+          // hammering F#5 over and over).
+          while (rawIdx > shiftedRangeEnd) rawIdx -= notesPerOctave;
+          while (rawIdx < shiftedRangeStart) rawIdx += notesPerOctave;
+          // Final safety clamp in case the wrap didn't resolve (tiny ranges)
+          const noteIdx = Math.max(shiftedRangeStart, Math.min(shiftedRangeEnd, rawIdx));
           let noteStr = currentNotes[noteIdx];
           try {
             let m = Tone.Frequency(noteStr).toMidi();
@@ -4181,6 +4236,45 @@
         backbeatStrength: 1.3,
         ornaments: ['ghost'],
         description: 'Trip-hop. Half-time. Sparse. Heavy snare.',
+      },
+      // Bouncy pop/funk drummer — light swing, popping backbeat. For pluck-y,
+      // upbeat presets where you want movement without heaviness.
+      the_kid: {
+        name: 'The Kid',
+        swing: 0.08,            // tiny light swing
+        humanize: 0.5,
+        ghostProb: 0.4,
+        variation: 0.4,
+        fillStyle: 'straight',
+        backbeatStrength: 1.15, // poppy snare on 2/4
+        ornaments: ['flam', 'ghost'],
+        description: 'Bouncy pop/funk. Light swing. Poppy snare.',
+      },
+      // Gospel/soul drummer — HUGE backbeat, massive ghost army, deep pocket.
+      // For bluesy/soulful presets that need an 80s gospel drummer vibe.
+      the_preacher: {
+        name: 'The Preacher',
+        swing: 0.2,             // medium shuffle
+        humanize: 0.85,
+        ghostProb: 0.85,        // ghost-snare barrage
+        variation: 0.55,
+        fillStyle: 'jazzy',
+        backbeatStrength: 1.4,  // MASSIVE backbeat
+        ornaments: ['flam', 'ghost', 'stumble'],
+        description: 'Gospel pocket. Huge backbeat. Ghost barrage.',
+      },
+      // Glitch-machine drummer — still mostly mechanical like the_machine, but
+      // with TINY micro-glitches and ghost pops. Broken-beat electronic feel.
+      the_robot: {
+        name: 'The Robot',
+        swing: 0,
+        humanize: 0.12,          // tiny humanize for glitch-accent feel
+        ghostProb: 0.1,
+        variation: 0.1,          // occasional glitch decorations
+        fillStyle: 'broken',
+        backbeatStrength: 0.85,  // lighter than machine — more scattered
+        ornaments: ['ghost'],
+        description: 'Glitch machine. Pattern is law but with micro-pops.',
       },
     };
 
@@ -5797,6 +5891,7 @@
         },
         _instruments: {
           lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.01, decay: 0.4, sustain: 0.6, release: 0.6 }, cutoff: 3500, res: 1.2, level: 0.6 },
+          lead_active: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.005, decay: 0.3, sustain: 0.65, release: 0.4 }, cutoff: 5500, res: 2.0, level: 0.55 }, // brighter cutoff, snappier attack
           pad:  { type: 'poly', wave: 'fatsine', spread: 30, envelope: { attack: 1.8, decay: 1.0, sustain: 0.85, release: 3.5 }, cutoff: 1400, res: 0.5, level: 0.4 },
           bass: { type: 'poly-mono', wave: 'sawtooth', maxPolyphony: 4, envelope: { attack: 0.005, decay: 0.3, sustain: 0.6, release: 0.4 },
                   filterEnv: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.4, baseFrequency: 85, octaves: 2.2 }, cutoff: 500, res: 1.2, level: 0.7 },
@@ -5836,6 +5931,7 @@
         _instruments: {
           // Lead — bright sine bell with sharp attack and long shimmering tail
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.2, sustain: 0, release: 2.5 }, cutoff: 9000, res: 4, level: 0.55 },
+          lead_active: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 0.6, sustain: 0, release: 1.5 }, cutoff: 14000, res: 8, level: 0.5 }, // pushed into brilliant high register, tighter tail
           // Pad — soft fatsine wash to hold the harmonic space
           pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 1.5, decay: 1.0, sustain: 0.6, release: 3.5 }, cutoff: 2500, res: 0.4, level: 0.35 },
           // Bass — warm triangle, short and clean so it stays out of the bells' way
@@ -5876,10 +5972,11 @@
         _instruments: {
           // Lead — rare melodic moments, soft fatsine
           lead: { type: 'poly', wave: 'fatsine', spread: 15, envelope: { attack: 2.0, decay: 1.5, sustain: 0.7, release: 4.0 }, cutoff: 2200, res: 0.4, level: 0.45 },
+          lead_active: { type: 'poly', wave: 'fatsawtooth', spread: 20, envelope: { attack: 1.0, decay: 1.0, sustain: 0.8, release: 3.0 }, cutoff: 3500, res: 0.8, level: 0.42 }, // fatsawtooth for more harmonic presence, warmer cutoff
           // Pad — the star of the preset: massive detuned wash
           pad:  { type: 'poly', wave: 'fatsawtooth', spread: 40, envelope: { attack: 4.0, decay: 3.0, sustain: 0.9, release: 6.0 }, cutoff: 1600, res: 0.3, level: 0.55 },
-          // Bass — slow-moving sub presence
-          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 3, envelope: { attack: 1.5, decay: 2.0, sustain: 0.8, release: 3.5 },
+          // Bass — fattriangle for harmonic presence on mobile (fatsine had no harmonics above fundamental)
+          bass: { type: 'poly-mono', wave: 'fattriangle', maxPolyphony: 3, envelope: { attack: 1.5, decay: 2.0, sustain: 0.8, release: 3.5 },
                   filterEnv: { attack: 0.5, decay: 1.0, sustain: 0.6, release: 2.0, baseFrequency: 60, octaves: 1.5 }, cutoff: 400, res: 0.6, level: 0.55 },
           // Arp — gentle triangle plucks (rarely used)
           arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.02, decay: 0.6, sustain: 0.2, release: 1.0 }, cutoff: 3500, res: 0.8, level: 0.35 },
@@ -5904,7 +6001,7 @@
           osc2_level:{ source:'plant_smooth', depth:0.6 },     // voltage crossfades oscillators
         }, _perc: true, _percFeel: 'pluck', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 95, _scale: 'pentatonic', _root: 'A',
         _macros: { energy: 'plant_activity' },
-        _drumKit: 'tight_modern', _drummer: 'the_rocker',
+        _drumKit: 'tight_modern', _drummer: 'the_kid',
         _drumHumanize: 0.2,
         _track: { minDuration: 300, maxDuration: 480, rootPool: ['A', 'E', 'D', 'G'] },  // pluck, 5-8 min, lively pentatonic fifths
         // Pluck — bouncy arp with tight arrangement
@@ -5922,7 +6019,8 @@
         },
         _instruments: {
           // Lead — sharp sawtooth, zero sustain — classic pluck
-          lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 }, cutoff: 5000, res: 2.2, level: 0.6 },
+          lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.15 }, cutoff: 5000, res: 2.2, level: 0.6 },
+          lead_active: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.15 }, cutoff: 8000, res: 3.5, level: 0.55 }, // brighter cutoff, sharper resonance for more twang
           // Pad — soft triangle, medium attack
           pad:  { type: 'poly', wave: 'triangle', envelope: { attack: 1.0, decay: 0.8, sustain: 0.6, release: 2.0 }, cutoff: 2200, res: 0.6, level: 0.35 },
           // Bass — tight mono-sawtooth with fast filter envelope
@@ -5965,10 +6063,11 @@
         _instruments: {
           // Lead — airy sine with filter character, breathy attack
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.2, sustain: 0.5, release: 3.0 }, cutoff: 1800, res: 3.0, level: 0.4 },
+          lead_active: { type: 'poly', wave: 'sine', envelope: { attack: 0.8, decay: 0.8, sustain: 0.6, release: 2.0 }, cutoff: 3200, res: 5, level: 0.38 }, // faster bloom, filter opens wider and resonates more
           // Pad — fatsine wash, very slow
           pad:  { type: 'poly', wave: 'fatsine', spread: 20, envelope: { attack: 3.0, decay: 2.0, sustain: 0.7, release: 4.5 }, cutoff: 1400, res: 2.5, level: 0.5 },
-          // Bass — sine sub, very gentle
-          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 1.0, decay: 1.5, sustain: 0.6, release: 2.5 },
+          // Bass — triangle sub (not sine — triangle has 3rd/5th/7th harmonics at 195/325/455Hz for a C2 fundamental, so mobile speakers can actually hear the bass)
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 2, envelope: { attack: 1.0, decay: 1.5, sustain: 0.6, release: 2.5 },
                   filterEnv: { attack: 0.3, decay: 1.0, sustain: 0.5, release: 2.0, baseFrequency: 65, octaves: 1.2 }, cutoff: 500, res: 1.8, level: 0.45 },
           // Arp — triangle whisper, rarely triggered
           arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.1, decay: 0.5, sustain: 0.2, release: 1.0 }, cutoff: 2500, res: 1.5, level: 0.3 },
@@ -6007,10 +6106,11 @@
         _instruments: {
           // Lead — pure resonant sine, very high cutoff
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.5, sustain: 0, release: 3.0 }, cutoff: 14000, res: 10, level: 0.55 },
+          lead_active: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 2.0 }, cutoff: 16000, res: 14, level: 0.5 }, // near-Nyquist shimmer, tighter decay for more percussive glass ping
           // Pad — soft sine, slow movement
           pad:  { type: 'poly', wave: 'sine', envelope: { attack: 2.5, decay: 1.5, sustain: 0.6, release: 3.5 }, cutoff: 2500, res: 0.5, level: 0.35 },
-          // Bass — sine sub, clean
-          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.8 },
+          // Bass — triangle sub (not sine — harmonics carry on mobile speakers)
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 2, envelope: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.8 },
                   filterEnv: { attack: 0.01, decay: 0.3, sustain: 0.2, release: 0.8, baseFrequency: 70, octaves: 1.5 }, cutoff: 550, res: 0.6, level: 0.5 },
           // Arp — inharmonic resonant sine drips
           arp:  { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 0.8, sustain: 0, release: 1.5 }, cutoff: 12000, res: 8, level: 0.4 },
@@ -6062,10 +6162,11 @@
         _instruments: {
           // Lead — shimmering sine, slow attack
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 2.0, decay: 2.0, sustain: 0.7, release: 5.0 }, cutoff: 3000, res: 0.6, level: 0.4 },
+          lead_active: { type: 'poly', wave: 'fatsine', spread: 20, envelope: { attack: 1.0, decay: 1.5, sustain: 0.8, release: 4.0 }, cutoff: 5000, res: 1.2, level: 0.38 }, // fatsine adds shimmer width, faster swell, filter opens
           // Pad — massive fatsine wash, very slow
           pad:  { type: 'poly', wave: 'fatsine', spread: 35, envelope: { attack: 5.0, decay: 4.0, sustain: 0.9, release: 8.0 }, cutoff: 1800, res: 0.4, level: 0.55 },
-          // Bass — deep fatsine sub-drone
-          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 2, envelope: { attack: 3.0, decay: 3.0, sustain: 0.8, release: 6.0 },
+          // Bass — deep fattriangle sub-drone (harmonics carry on mobile)
+          bass: { type: 'poly-mono', wave: 'fattriangle', maxPolyphony: 2, envelope: { attack: 3.0, decay: 3.0, sustain: 0.8, release: 6.0 },
                   filterEnv: { attack: 1.0, decay: 1.5, sustain: 0.6, release: 3.0, baseFrequency: 55, octaves: 1.2 }, cutoff: 400, res: 0.5, level: 0.55 },
           // Arp — gentle sine shimmer
           arp:  { type: 'poly', wave: 'sine', envelope: { attack: 0.05, decay: 0.8, sustain: 0.2, release: 1.5 }, cutoff: 4000, res: 1.0, level: 0.3 },
@@ -6093,7 +6194,7 @@
           filter_res:{ source:'plant_raw', depth:0.3 },        // gentle resonance
         }, lfo1_rate:0.5, _perc: true, _percFeel: 'organic', _percChar: 'distorted', _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 80, _scale: 'dorian', _root: 'G',
         _macros: { energy: 'plant_activity' },
-        _drumKit: 'tight_modern', _drummer: 'the_cat',
+        _drumKit: 'tight_modern', _drummer: 'the_preacher',
         _drumHumanize: 0.9,
         _track: { minDuration: 360, maxDuration: 600, rootPool: ['G', 'D', 'A', 'E'] },  // organic, 6-10 min, dorian fifths
         // Organic — bluesy rotation with drum style changes per section
@@ -6112,6 +6213,7 @@
         _instruments: {
           // Lead — fat sawtooth, warm but clean (dist comes from shared macro)
           lead: { type: 'poly', wave: 'fatsawtooth', spread: 18, envelope: { attack: 0.02, decay: 0.5, sustain: 0.5, release: 0.8 }, cutoff: 2000, res: 2.0, level: 0.55 },
+          lead_active: { type: 'poly', wave: 'fatsawtooth', spread: 22, envelope: { attack: 0.01, decay: 0.35, sustain: 0.55, release: 0.6 }, cutoff: 3500, res: 3.0, distAmt: 0.12, level: 0.55 }, // wider spread, more grit via distAmt, filter opens up
           // Pad — warm fattriangle, rich harmonics
           pad:  { type: 'poly', wave: 'fattriangle', spread: 15, envelope: { attack: 0.8, decay: 1.0, sustain: 0.7, release: 2.5 }, cutoff: 1400, res: 1.0, level: 0.4 },
           // Bass — clean mono-sawtooth, deep filter punch — lets the kick be the low-end anchor
@@ -6177,6 +6279,9 @@
           // Warm mid cutoffs, moderate resonance, subtle distortion — classic analog 80s.
           // Lead — fat detuned sawtooth, warm filter, subtle drive
           lead: { type: 'poly', wave: 'fatsawtooth', spread: 24, envelope: { attack: 0.008, decay: 0.3, sustain: 0.75, release: 0.8 }, cutoff: 3200, res: 2.5, distAmt: 0.08, level: 0.65 },
+          // Lead Active — bright digital square that crossfades in when plant is active.
+          // Creates an analog-warm → digital-bright morph as the plant's energy rises.
+          lead_active: { type: 'poly', wave: 'square', envelope: { attack: 0.003, decay: 0.2, sustain: 0.65, release: 0.4 }, cutoff: 5500, res: 1.8, level: 0.55 },
           // Pad — massive wide detuned saw wash, low cutoff for warmth
           pad:  { type: 'poly', wave: 'fatsawtooth', spread: 42, envelope: { attack: 1.2, decay: 1.2, sustain: 0.8, release: 2.5 }, cutoff: 1600, res: 0.8, level: 0.42 },
           // Bass — THE 80s synth bass — mono sawtooth, deep filter envelope sweep
@@ -6220,10 +6325,11 @@
         _instruments: {
           // Lead — pure sine, long tail lets reverb do the work
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.002, decay: 2.0, sustain: 0, release: 4.5 }, cutoff: 7000, res: 2.5, level: 0.55 },
+          lead_active: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.2, sustain: 0, release: 3.0 }, cutoff: 10000, res: 5, level: 0.5 }, // tighter crystalline ping, brighter and more resonant
           // Pad — fatsine wash
           pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 3.0, decay: 2.5, sustain: 0.6, release: 5.0 }, cutoff: 2000, res: 0.5, level: 0.4 },
-          // Bass — soft sub, very gentle
-          bass: { type: 'poly-mono', wave: 'sine', maxPolyphony: 2, envelope: { attack: 0.05, decay: 1.0, sustain: 0.3, release: 1.5 },
+          // Bass — triangle sub (harmonics carry on mobile)
+          bass: { type: 'poly-mono', wave: 'triangle', maxPolyphony: 2, envelope: { attack: 0.05, decay: 1.0, sustain: 0.3, release: 1.5 },
                   filterEnv: { attack: 0.02, decay: 0.5, sustain: 0.2, release: 1.0, baseFrequency: 60, octaves: 1.5 }, cutoff: 450, res: 0.8, level: 0.45 },
           // Arp — sparse triangle drops
           arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.002, decay: 1.0, sustain: 0, release: 2.0 }, cutoff: 6500, res: 3.0, level: 0.45 },
@@ -6276,10 +6382,11 @@
         _instruments: {
           // Lead — dark triangle, slow attack
           lead: { type: 'poly', wave: 'triangle', envelope: { attack: 1.5, decay: 1.5, sustain: 0.6, release: 3.5 }, cutoff: 1600, res: 1.5, level: 0.45 },
+          lead_active: { type: 'poly', wave: 'triangle', envelope: { attack: 0.8, decay: 1.0, sustain: 0.7, release: 2.5 }, cutoff: 2800, res: 2.0, level: 0.42 }, // filter opens from murky to present, quicker bloom
           // Pad — deep fatsine
           pad:  { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 3.0, decay: 2.5, sustain: 0.85, release: 5.0 }, cutoff: 1200, res: 0.8, level: 0.55 },
-          // Bass — DEEP fatsine sub — the foundation
-          bass: { type: 'poly-mono', wave: 'fatsine', maxPolyphony: 2, envelope: { attack: 1.0, decay: 2.0, sustain: 0.8, release: 4.0 },
+          // Bass — DEEP fattriangle sub (harmonics at 3×/5×/7× fundamental carry on mobile)
+          bass: { type: 'poly-mono', wave: 'fattriangle', maxPolyphony: 2, envelope: { attack: 1.0, decay: 2.0, sustain: 0.8, release: 4.0 },
                   filterEnv: { attack: 0.3, decay: 1.0, sustain: 0.6, release: 2.0, baseFrequency: 50, octaves: 1.3 }, cutoff: 350, res: 1.2, level: 0.6 },
           // Arp — gentle triangle, rarely used
           arp:  { type: 'poly', wave: 'triangle', envelope: { attack: 0.05, decay: 1.0, sustain: 0.2, release: 2.0 }, cutoff: 2500, res: 1.0, level: 0.35 },
@@ -6309,7 +6416,7 @@
           amp_level:{ source:'plant_smooth', depth:0.3 },      // overall level follows voltage
         }, _perc: true, _percFeel: 'circuit', _percChar: 'tight', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 115, _scale: 'pentatonic', _root: 'C',
         _macros: { energy: 'plant_activity' },
-        _drumKit: 'chiptune', _drummer: 'the_machine',
+        _drumKit: 'chiptune', _drummer: 'the_robot',
         _drumHumanize: 0,
         _track: { minDuration: 240, maxDuration: 360, rootPool: ['C', 'G', 'D', 'F'] },  // circuit, 4-6 min, game music pentatonic
         // Circuit — tight chiptune structure, mechanical 8-bit
@@ -6328,6 +6435,7 @@
           // Triangle bass (NES channel 3). No distortion (chiptune is clean), no chorus character.
           // Lead — pure square, NARROW cutoff (chiptune is not bright — it's tight)
           lead: { type: 'poly', wave: 'square', envelope: { attack: 0.001, decay: 0.08, sustain: 0.55, release: 0.06 }, cutoff: 3200, res: 0.4, level: 0.55 },
+          lead_active: { type: 'poly', wave: 'square', envelope: { attack: 0.001, decay: 0.06, sustain: 0.6, release: 0.05 }, cutoff: 5500, res: 1.0, level: 0.52 }, // filter cracks open for a more charged buzzy square
           // Pad — square (NES 2nd pulse channel) — still square, not triangle — chiptune is square-only
           pad:  { type: 'poly', wave: 'square', envelope: { attack: 0.3, decay: 0.3, sustain: 0.5, release: 0.5 }, cutoff: 2200, res: 0.3, level: 0.32 },
           // Bass — triangle (NES bass channel) — narrow muffled tone, not full-range
@@ -6370,7 +6478,7 @@
           amp_level:{ source:'plant_smooth', depth:0.2 },      // gentle dynamics
         },
         _perc: true, _percFeel: 'calm', _percChar: 'soft',
-        _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 72, _scale: 'major', _root: 'G',
+        _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 72, _scale: 'major', _root: 'G',
         _macros: { space: 'plant_smooth', energy: 'plant_activity' },
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0.3,
@@ -6401,6 +6509,13 @@
                   envelope: { attack: 0.001, decay: 3.2, sustain: 0.08, release: 2.5 },
                   modEnvelope: { attack: 0.001, decay: 0.25, sustain: 0, release: 0.4 },
                   cutoff: 8000, res: 0.4, level: 0.62 },
+          // Lead Active — brighter FM with MORE hammer (higher modIndex, faster mod decay).
+          // Crossfades in when plant is active → piano gets more percussive/bright.
+          lead_active: { type: 'fm', maxPolyphony: 6,
+                  harmonicity: 4, modulationIndex: 18,
+                  envelope: { attack: 0.001, decay: 2.0, sustain: 0.05, release: 1.5 },
+                  modEnvelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.2 },
+                  cutoff: 12000, res: 0.8, level: 0.55 },
           // Pad — sustained sine for cello-like body underneath the piano
           pad:  { type: 'poly', wave: 'sine', envelope: { attack: 1.5, decay: 1.5, sustain: 0.7, release: 3.0 }, cutoff: 900, res: 0.3, level: 0.35 },
           // Bass — FM piano bass too (matches lead character in lower register)
@@ -6479,6 +6594,11 @@
           lead: { type: 'poly', wave: 'triangle',
                   envelope: { attack: 0.02, decay: 0.7, sustain: 0.45, release: 1.6 },
                   cutoff: 3200, res: 1.3, distAmt: 0.1, level: 0.65 },
+          // Lead Active — warmer, brighter sine with more mid-presence.
+          // Plant energy turns the Rhodes into a more present, forward-sounding voice.
+          lead_active: { type: 'poly', wave: 'fatsine', spread: 12,
+                  envelope: { attack: 0.01, decay: 0.4, sustain: 0.55, release: 1.0 },
+                  cutoff: 4200, res: 1.8, distAmt: 0.15, level: 0.58 },
           // Pad — warm sine, very slow attack, sits behind the lead
           pad:  { type: 'poly', wave: 'sine',
                   envelope: { attack: 1.4, decay: 0.8, sustain: 0.85, release: 3.2 },
