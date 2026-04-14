@@ -9,12 +9,10 @@
   <script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
   <script src="https://cdn.jsdelivr.net/npm/tone@14"></script>
-  <!-- Magenta.js ML music suite (Apache 2.0). Falls back to algorithmic if unavailable.
-       core: shared utilities, NoteSequence. music_rnn: MelodyRNN + DrumsRNN.
-       music_vae: MusicVAE + GrooVAE + MidiMe. All load async with graceful degradation. -->
-  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/core.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/music_rnn.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/music_vae.js"></script>
+  <!-- Magenta.js ML music suite (Apache 2.0). Full UMD bundle exposes global `mm` namespace.
+       Includes MusicRNN (MelodyRNN, DrumsRNN, ImprovRNN), MusicVAE (trio, groove, melody),
+       and utilities. Falls back to algorithmic if CDN fails. -->
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1"></script>
   <!-- MQTT is proxied through the backend via SSE — no client-side MQTT needed -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -3287,12 +3285,12 @@
 
     async function initMagenta() {
       try {
-        if (typeof music_rnn === 'undefined') {
+        if (typeof mm === 'undefined' || !mm.MusicRNN) {
           console.warn('[Magenta] library not loaded — using algorithmic fallback');
           return;
         }
-        magentaRNN = new music_rnn.MusicRNN(
-          'https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/melody_rnn'
+        magentaRNN = new mm.MusicRNN(
+          '/static/models/melody_rnn'
         );
         await magentaRNN.initialize();
         magentaReady = true;
@@ -3312,9 +3310,9 @@
 
     async function initDrumsRNN() {
       try {
-        if (typeof music_rnn === 'undefined') return;
-        drumsRNN = new music_rnn.MusicRNN(
-          'https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/drum_kit_rnn'
+        if (typeof mm === 'undefined' || !mm.MusicRNN) return;
+        drumsRNN = new mm.MusicRNN(
+          '/static/models/drum_kit_rnn'
         );
         await drumsRNN.initialize();
         drumsRNNReady = true;
@@ -3377,9 +3375,9 @@
 
     async function initGrooVAE() {
       try {
-        if (typeof music_vae === 'undefined') return;
-        grooveVAE = new music_vae.MusicVAE(
-          'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/groovae_4bar'
+        if (typeof mm === 'undefined' || !mm.MusicVAE) return;
+        grooveVAE = new mm.MusicVAE(
+          '/static/models/groovae_4bar'
         );
         await grooveVAE.initialize();
         grooveReady = true;
@@ -3436,9 +3434,9 @@
 
     async function initMusicVAE() {
       try {
-        if (typeof music_vae === 'undefined') return;
-        musicVAE = new music_vae.MusicVAE(
-          'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/mel_4bar_med_lokl_q2'
+        if (typeof mm === 'undefined' || !mm.MusicVAE) return;
+        musicVAE = new mm.MusicVAE(
+          '/static/models/mel_4bar_med_lokl_q2'
         );
         await musicVAE.initialize();
         musicVAEReady = true;
@@ -3553,6 +3551,170 @@
       initMusicVAE();
     }
 
+    // --- Trio MusicVAE: coherent melody + bass + drums in one generation ---
+    let trioVAE = null, trioReady = false;
+    let _trioLoadRequested = false;
+    let _mlBassPhrase = null; // [{note, vel, gate}] from trio bass track
+
+    async function initTrioVAE() {
+      try {
+        if (typeof mm === 'undefined' || !mm.MusicVAE) return;
+        trioVAE = new mm.MusicVAE(
+          '/static/models/trio_4bar'
+        );
+        await trioVAE.initialize();
+        trioReady = true;
+        console.log('%c[Magenta] %cTrio VAE loaded — coherent multi-track generation active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+      } catch (e) {
+        console.warn('[Magenta] Trio VAE failed:', e.message || e);
+      }
+    }
+
+    function ensureTrioVAE() {
+      if (trioReady || _trioLoadRequested) return;
+      _trioLoadRequested = true;
+      initTrioVAE();
+    }
+
+    async function generateTrioBuffer() {
+      if (!trioReady || !trioVAE) return null;
+      try {
+        const temp = 0.5 + Math.min(currentActivity / 50, 1) * 1.0;
+        const t0 = Date.now();
+        const samples = await trioVAE.sample(1, temp);
+        const elapsed = Date.now() - t0;
+        const trio = samples[0];
+        if (!trio || !trio.notes) return null;
+
+        // Split NoteSequence by track using Magenta's TrioConverter instrument field:
+        // instrument 0 = melody, instrument 1 = bass, instrument 2 / isDrum = drums
+        const melNotes = trio.notes.filter(n => !n.isDrum && (n.instrument === 0 || n.instrument === undefined));
+        const bassNotes = trio.notes.filter(n => !n.isDrum && n.instrument === 1);
+        const drumNotes = trio.notes.filter(n => n.isDrum);
+
+        // Convert melody → phrase format
+        const melody = [];
+        for (const n of melNotes) {
+          melody.push({
+            note: snapToScale(n.pitch),
+            vel: Math.max(0.12, 0.25 + (n.velocity || 80) / 127 * 0.35),
+            gate: Math.max(0.15, ((n.quantizedEndStep || 1) - (n.quantizedStartStep || 0)) * 0.25),
+          });
+        }
+
+        // Convert bass → phrase format (lower octave)
+        const bass = [];
+        for (const n of bassNotes) {
+          let p = n.pitch;
+          while (p > 55) p -= 12; // keep bass low
+          while (p < 36) p += 12;
+          bass.push({
+            note: snapToScale(p),
+            vel: Math.max(0.12, 0.2 + (n.velocity || 80) / 127 * 0.3),
+            gate: Math.max(0.15, ((n.quantizedEndStep || 1) - (n.quantizedStartStep || 0)) * 0.25),
+          });
+        }
+
+        // Convert drums → pattern format
+        const drums = { kick: new Array(16).fill(0), snare: new Array(16).fill(0),
+                        hat: new Array(16).fill(0), rim: new Array(16).fill(0) };
+        for (const n of drumNotes) {
+          const step = (n.quantizedStartStep || 0) % 16;
+          const inst = MAGENTA_DRUM_MAP[n.pitch];
+          if (inst && drums[inst]) {
+            const v = (n.velocity || 80) / 127;
+            drums[inst][step] = v > 0.7 ? 3 : v > 0.4 ? 2 : 1;
+          }
+        }
+
+        console.log(
+          `%c[Magenta] %cTrio generated in ${elapsed}ms: ${melody.length} mel, ${bass.length} bass, ${drumNotes.length} drum notes, temp=${temp.toFixed(1)}`,
+          'color:#fbbf24;font-weight:bold', 'color:#34d399'
+        );
+        return { melody: melody.length > 0 ? melody : null,
+                 bass: bass.length > 0 ? bass : null,
+                 drums };
+      } catch (e) {
+        console.warn('[Magenta] Trio generation failed:', e.message || e);
+        return null;
+      }
+    }
+
+    // --- chord_pitches_improv: chord-conditioned piano melody ---
+    let improvRNN = null, improvReady = false;
+    let _improvLoadRequested = false;
+
+    async function initImprovRNN() {
+      try {
+        if (typeof mm === 'undefined' || !mm.MusicRNN) return;
+        improvRNN = new mm.MusicRNN(
+          '/static/models/chord_pitches_improv'
+        );
+        await improvRNN.initialize();
+        improvReady = true;
+        console.log('%c[Magenta] %cchord_pitches_improv loaded — piano harmony-following active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+      } catch (e) {
+        console.warn('[Magenta] ImprovRNN failed:', e.message || e);
+      }
+    }
+
+    function ensureImprovRNN() {
+      if (improvReady || _improvLoadRequested) return;
+      _improvLoadRequested = true;
+      initImprovRNN();
+    }
+
+    // Extract the current chord symbol from the drone for chord conditioning
+    function getCurrentChordSymbol() {
+      const root = document.getElementById('rootSelect')?.value || 'C';
+      const scale = document.getElementById('scaleSelect')?.value || 'major';
+      const quality = (scale === 'major' || scale === 'mixolydian' || scale === 'wholeTone') ? '' : 'm';
+      return root + quality;
+    }
+
+    async function generatePianoPhrase() {
+      if (!improvReady || !improvRNN || !currentMotif) return null;
+      try {
+        const chord = getCurrentChordSymbol();
+        const rootNote = document.getElementById('rootSelect')?.value || 'C';
+        const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
+        const seed = motifToNoteSequence(currentMotif, rootMidi);
+
+        // Piano temperature: gentle range. Calm plant = 0.3 (flowing), active = 0.9 (adventurous)
+        const temperature = 0.3 + Math.min(currentActivity / 80, 1) * 0.6;
+        const numSteps = 24 + Math.floor(Math.random() * 16);
+
+        const t0 = Date.now();
+        // Chord conditioning: 4 bars of the current chord
+        const chords = [chord, chord, chord, chord];
+        const result = await improvRNN.continueSequence(seed, numSteps, temperature, chords);
+        const elapsed = Date.now() - t0;
+
+        const phrase = [];
+        for (const n of result.notes) {
+          if ((n.quantizedStartStep || 0) < seed.totalQuantizedSteps) continue;
+          phrase.push({
+            note: snapToScale(n.pitch),
+            vel: Math.max(0.12, 0.2 + (n.velocity || 80) / 127 * 0.4),
+            gate: Math.max(0.2, ((n.quantizedEndStep || 1) - (n.quantizedStartStep || 0)) * 0.3),
+          });
+        }
+
+        if (phrase.length > 0) {
+          console.log(
+            `%c[Magenta] %cPiano improv: ${phrase.length} notes in ${elapsed}ms, chord=${chord}, temp=${temperature.toFixed(2)}`,
+            'color:#fbbf24;font-weight:bold', 'color:#34d399'
+          );
+        }
+        return phrase.length > 0 ? phrase : null;
+      } catch (e) {
+        console.warn('[Magenta] Piano improv failed:', e.message || e);
+        return null;
+      }
+    }
+
     // Convert PlantPulse motif → Magenta NoteSequence for seeding the RNN
     function motifToNoteSequence(motif, rootMidi) {
       const SQ = 4; // steps per quarter note
@@ -3592,60 +3754,78 @@
     }
 
     // Generate a phrase via MelodyRNN — async, returns [{note, vel, gate}] or null
+    // === MODEL-SELECTING DISPATCHER ===
+    // Picks the best Magenta model for the current preset:
+    //   Piano → chord_pitches_improv (harmony-following, elegant)
+    //   Track presets → Trio VAE (coherent melody+bass+drums)
+    //   Ambient/drone → MusicVAE latent space (XY pad navigation)
+    //   Fallback → MelodyRNN continuation (motif-seeded)
+    //   Ultimate fallback → algorithmic generatePhrase
     async function generateMagentaPhrase() {
-      // For ambient/drone presets: use MusicVAE latent space if ready.
-      // XY pad position (or plant signal) navigates the latent space.
-      if (musicVAEReady && SYNTH_PARAMS.seq_mode.value === 'drone') {
+      const mode = SYNTH_PARAMS.seq_mode.value;
+
+      // 1. PIANO: chord-conditioned improvisation (elegant, harmony-following)
+      if (currentPresetName === 'piano') {
+        ensureImprovRNN(); // trigger load if not already
+        if (improvReady) {
+          const phrase = await generatePianoPhrase();
+          if (phrase) return phrase;
+        }
+      }
+
+      // 2. TRACK PRESETS: Trio VAE (coherent melody+bass+drums from one model)
+      if (mode !== 'drone' && trioReady) {
+        const trio = await generateTrioBuffer();
+        if (trio) {
+          // Feed bass + drums to their respective systems
+          if (trio.bass) _mlBassPhrase = trio.bass;
+          if (trio.drums) { _mlDrumPattern = trio.drums; _percPatternCache = {}; }
+          if (trio.melody) return trio.melody;
+        }
+      }
+
+      // 3. AMBIENT/DRONE: MusicVAE latent space (XY pad driven)
+      if (musicVAEReady && mode === 'drone') {
         const phrase = await generateVAEPhrase(xyX, xyY);
         if (phrase) return phrase;
-        // Fall through to RNN if VAE fails
       }
 
-      if (!magentaReady || !currentMotif || !magentaRNN) return null;
-      try {
-        // Get the current section's motif variation (straight/inverted/etc)
-        const curSec = getCurrentSection();
-        const variationName = (curSec && curSec.motifStyle) || 'straight';
-        const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
-        const variedMotif = variationFn(currentMotif);
-
-        // Convert to NoteSequence seed
-        const rootNote = document.getElementById('rootSelect')?.value || 'C';
-        const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
-        const seed = motifToNoteSequence(variedMotif, rootMidi);
-
-        // Temperature from plant: quiet=0.6 (conservative melodies), active=2.0 (wild)
-        const temperature = 0.6 + Math.min(currentActivity / 50, 1) * 1.4;
-
-        // Generate continuation
-        const numSteps = 16 + Math.floor(Math.random() * 16);
-        const t0 = Date.now();
-        const result = await magentaRNN.continueSequence(seed, numSteps, temperature);
-        const elapsed = Date.now() - t0;
-
-        // Convert back to PlantPulse phrase format, post-filtering to scale
-        const phrase = [];
-        for (const n of result.notes) {
-          if (n.quantizedStartStep < seed.totalQuantizedSteps) continue; // skip seed
-          const snapped = snapToScale(n.pitch);
-          const vel = Math.max(0.12, 0.25 + (n.velocity || 80) / 127 * 0.35);
-          const gate = Math.max(0.15, (n.quantizedEndStep - n.quantizedStartStep) * 0.25);
-          phrase.push({ note: snapped, vel, gate });
+      // 4. FALLBACK: MelodyRNN continuation from motif seed
+      if (magentaReady && currentMotif && magentaRNN) {
+        try {
+          const curSec = getCurrentSection();
+          const variationName = (curSec && curSec.motifStyle) || 'straight';
+          const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
+          const variedMotif = variationFn(currentMotif);
+          const rootNote = document.getElementById('rootSelect')?.value || 'C';
+          const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
+          const seed = motifToNoteSequence(variedMotif, rootMidi);
+          const temperature = 0.6 + Math.min(currentActivity / 50, 1) * 1.4;
+          const numSteps = 16 + Math.floor(Math.random() * 16);
+          const t0 = Date.now();
+          const result = await magentaRNN.continueSequence(seed, numSteps, temperature);
+          const elapsed = Date.now() - t0;
+          const phrase = [];
+          for (const n of result.notes) {
+            if (n.quantizedStartStep < seed.totalQuantizedSteps) continue;
+            phrase.push({
+              note: snapToScale(n.pitch),
+              vel: Math.max(0.12, 0.25 + (n.velocity || 80) / 127 * 0.35),
+              gate: Math.max(0.15, (n.quantizedEndStep - n.quantizedStartStep) * 0.25),
+            });
+          }
+          if (phrase.length > 0) {
+            console.log(`%c[Magenta] %cRNN fallback: ${phrase.length} notes in ${elapsed}ms temp=${temperature.toFixed(1)}`,
+              'color:#fbbf24;font-weight:bold', 'color:#34d399');
+            return phrase;
+          }
+        } catch (e) {
+          console.warn('[Magenta] RNN fallback failed:', e.message || e);
         }
-
-        if (phrase.length > 0) {
-          console.log(
-            `%c[Magenta] %cgenerated ${phrase.length} notes in ${elapsed}ms ` +
-            `%ctemp=${temperature.toFixed(1)} seed=${variedMotif.intervals.join(',')}`,
-            'color:#fbbf24;font-weight:bold', 'color:#34d399', 'color:#8896b0'
-          );
-          return phrase;
-        }
-        return null;
-      } catch (e) {
-        console.warn('[Magenta] generation failed:', e.message || e);
-        return null;
       }
+
+      // 5. ULTIMATE FALLBACK: algorithmic (handled by caller)
+      return null;
     }
     let melodyPhraseIdx = 0;
     let melodyPhraseRepeat = 0; // how many times the current phrase has played
@@ -5396,14 +5576,26 @@
         const _arrBass = FACTORY_PRESETS[currentPresetName]?._arrangement;
         const _curSecBass = _arrBass && _arrBass.sections && _arrBass.sections[currentSectionIdx];
 
-        // Rest-bar — every 4th bar has a chance to drop bass entirely. Low probability
-        // so the riff stays present most of the time.
+        // === TRIO BASS OVERRIDE ===
+        // If Trio VAE generated a coherent bass phrase, play it instead of the
+        // riff system. Trio bass is harmonically coherent with the trio melody.
+        if (_mlBassPhrase && _mlBassPhrase.length > 0 && percStep === 0) {
+          const bassIdx = sectionBarCount % _mlBassPhrase.length;
+          const bn = _mlBassPhrase[bassIdx];
+          if (bn && bn.note) {
+            const bNote = clampNote(bn.note);
+            try { bassSynth.triggerAttackRelease(bNote, bn.gate || '4n', undefined, bn.vel || 0.3); } catch(_){}
+            logNoteEvent(bNote, bn.vel || 0.3, 'bass');
+          }
+        }
+
+        // Rest-bar — every 4th bar has a chance to drop bass entirely.
         const _barMod = sectionBarCount % 4;
         const _inRestBar = (_barMod === 3) && (sectionBarCount > 0);
         const _secDrumStyleForRest = (_curSecBass && _curSecBass.drumStyle) || 'full';
         const skipBass = _inRestBar && _secDrumStyleForRest === 'full' && Math.random() < 0.18;
 
-        // Apply section motifStyle + per-bar pitch rotation.
+        // Apply section motifStyle + per-bar pitch rotation (riff system fallback).
         // varyRiff rotates the pitch sequence by sectionBarCount so each bar hits
         // a different starting pitch — this is the main source of melodic variety.
         let activeRiff = null;
@@ -5575,26 +5767,77 @@
         await Tone.start();
         if (!osc1Synth) {
           buildSynthGraph();
-          // Re-apply vinyl level — preset loaded before graph existed
           const vPreset = FACTORY_PRESETS[currentPresetName];
           if (vinylGain && vPreset && vPreset._vinyl) {
             vinylGain.gain.rampTo(vPreset._vinyl, 0.3);
           }
-          // Build per-role instruments now that the audio graph exists
           if (vPreset) buildInstrumentsFromPreset(vPreset);
         }
+        if (!percGain) buildPercSynths();
+
+        // === WAIT FOR ML MODELS ===
+        // Trigger required models and wait before starting playback so the
+        // first phrases are ML-generated, not algorithmic fallback.
+        const mode = SYNTH_PARAMS.seq_mode.value;
+        const isPiano = currentPresetName === 'piano';
+        const needsTrio = mode !== 'drone' && percEnabled;
+        const needsImprov = isPiano;
+
+        // Trigger loading
+        if (needsTrio) { ensureDrumsRNN(); ensureTrioVAE(); }
+        if (needsImprov) ensureImprovRNN();
+
+        // Determine which model to wait for
+        const requiredReady = () => {
+          if (needsTrio && !trioReady) return false;
+          if (needsImprov && !improvReady) return false;
+          if (!magentaReady) return false; // always need base MelodyRNN
+          return true;
+        };
+
+        if (!requiredReady()) {
+          const _loadMsgs = [
+            'Photosynthesizing...', 'Growing neural roots...', 'Absorbing sunlight...',
+            'Unfurling leaves...', 'Tuning chlorophyll...', 'Connecting to mycelium...',
+            'Budding melodies...', 'Composting algorithms...', 'Germinating beats...',
+          ];
+          let _loadMsgIdx = 0;
+          btn.textContent = _loadMsgs[0];
+          btn.classList.add('loading');
+          // Poll every 300ms, timeout after 25s (fall back to algorithmic)
+          await new Promise(resolve => {
+            let elapsed = 0;
+            const poll = setInterval(() => {
+              elapsed += 300;
+              if (elapsed % 2400 === 0) {
+                _loadMsgIdx = (_loadMsgIdx + 1) % _loadMsgs.length;
+                btn.textContent = _loadMsgs[_loadMsgIdx];
+              }
+              if (requiredReady() || elapsed > 25000) {
+                clearInterval(poll);
+                resolve();
+              }
+            }, 300);
+          });
+          btn.classList.remove('loading');
+          if (requiredReady()) {
+            console.log('%c[Magenta] %cAll required models loaded — starting playback',
+              'color:#fbbf24;font-weight:bold', 'color:#34d399');
+          } else {
+            console.log('%c[Magenta] %cTimeout — starting with available models + algorithmic fallback',
+              'color:#fbbf24;font-weight:bold', 'color:#fbbf24');
+          }
+        }
+
         musicPlaying = true;
         btn.textContent = 'Stop';
         btn.classList.add('playing');
-        // Soft fade-in: mute master, then ramp up over 1 second
-        // Prevents startup transients (especially for resonant-filter presets like Wind)
         if (masterGain) {
           masterGain.gain.value = 0;
           masterGain.gain.rampTo(clamp01(getModValue('amp_level')), 1.0);
         }
         musicLoop = setInterval(musicTick, 50);
         startVisualization();
-        if (!percGain) buildPercSynths();
         buildPercGrid();
         if (SYNTH_PARAMS.seq_mode.value === 'drone') startDrone();
         // Start vinyl crackle if the preset uses it and the sample is loaded
@@ -7513,8 +7756,11 @@
       // Only rebuild if audio graph is up (masterGain exists) — otherwise defer to Play button
       if (masterGain && (musicPlaying || percEnabled)) {
         buildPercSynths();
-        ensureDrumsRNN(); // lazy-load DrumsRNN when drums are first needed
+        ensureDrumsRNN();
+        ensureTrioVAE(); // Trio for coherent multi-track generation
       }
+      // Piano gets chord-conditioned improv model
+      if (name === 'piano') ensureImprovRNN();
 
       // Apply melody settings from preset
       if (preset._melodyEnabled !== undefined) {
