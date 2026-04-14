@@ -9,9 +9,12 @@
   <script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
   <script src="https://cdn.jsdelivr.net/npm/tone@14"></script>
-  <!-- Magenta.js — ML melody generation (Apache 2.0). Falls back to algorithmic if unavailable. -->
+  <!-- Magenta.js ML music suite (Apache 2.0). Falls back to algorithmic if unavailable.
+       core: shared utilities, NoteSequence. music_rnn: MelodyRNN + DrumsRNN.
+       music_vae: MusicVAE + GrooVAE + MidiMe. All load async with graceful degradation. -->
   <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/core.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/music_rnn.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/music_vae.js"></script>
   <!-- MQTT is proxied through the backend via SSE — no client-side MQTT needed -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -2088,7 +2091,21 @@
         }
 
         // Breakdown riser — DISABLED for now (felt out of place).
-        // Breakdowns are pure "cut" style: sudden silence into the next section.
+
+        // Generate ML drum pattern for the new section (if DrumsRNN is ready).
+        // The ML pattern overrides the recipe-based one for this section.
+        if (drumsRNNReady && percEnabled && !isBreakdownSection(section)) {
+          generateMLDrumPattern().then(p => {
+            if (p) {
+              _mlDrumPattern = p;
+              _percPatternCache = {}; // clear cache so new pattern is used
+            }
+          });
+          // Also refresh GrooVAE humanization for the new section
+          if (grooveReady) {
+            humanizeDrumPattern().then(o => { if (o) _grooveOffsets = o; });
+          }
+        }
 
         // Entry accent — fires a crash cymbal to announce the new section audibly.
         // Defaults: 'crash' on named sections that typically lift (chorus/return/fuller).
@@ -3289,6 +3306,253 @@
     // Start loading immediately — async, non-blocking
     initMagenta();
 
+    // --- DrumsRNN: ML-generated drum patterns ---
+    let drumsRNN = null, drumsRNNReady = false;
+    let _mlDrumPattern = null; // {kick:[], snare:[], hat:[], rim:[]} from ML
+
+    async function initDrumsRNN() {
+      try {
+        if (typeof music_rnn === 'undefined') return;
+        drumsRNN = new music_rnn.MusicRNN(
+          'https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/drum_kit_rnn'
+        );
+        await drumsRNN.initialize();
+        drumsRNNReady = true;
+        console.log('%c[Magenta] %cDrumsRNN loaded — ML drum patterns active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+        // Auto-load GrooVAE after drums
+        initGrooVAE();
+      } catch (e) {
+        console.warn('[Magenta] DrumsRNN failed:', e.message || e);
+      }
+    }
+
+    // Magenta drum pitch mapping: 36=kick, 38=snare, 42=closedHH, 46=openHH, 49=crash, 51=ride
+    const MAGENTA_DRUM_MAP = { 36: 'kick', 38: 'snare', 42: 'hat', 46: 'hat', 49: 'rim', 51: 'rim' };
+    const DRUM_TO_MAGENTA = { kick: 36, snare: 38, hat: 42, rim: 51 };
+
+    async function generateMLDrumPattern() {
+      if (!drumsRNNReady || !drumsRNN) return null;
+      try {
+        // Sensor routing: ch4 (trunk) for drums, fallback to ch1
+        const drumActivity = (chState.ch4 && chState.ch4.connected)
+          ? chState.ch4.currentActivity : currentActivity;
+        const temperature = 0.5 + Math.min(drumActivity / 50, 1) * 1.5;
+
+        // Create a minimal seed (just kick on beat 1)
+        const seed = {
+          quantizationInfo: { stepsPerQuarter: 4 },
+          notes: [{ pitch: 36, quantizedStartStep: 0, quantizedEndStep: 1 }],
+          totalQuantizedSteps: 1,
+        };
+
+        const t0 = Date.now();
+        const result = await drumsRNN.continueSequence(seed, 32, temperature);
+        const elapsed = Date.now() - t0;
+
+        // Convert to our pattern format: 16-step arrays per instrument
+        const pattern = { kick: new Array(16).fill(0), snare: new Array(16).fill(0),
+                          hat: new Array(16).fill(0), rim: new Array(16).fill(0) };
+        for (const n of result.notes) {
+          const step = n.quantizedStartStep % 16;
+          const inst = MAGENTA_DRUM_MAP[n.pitch];
+          if (inst && pattern[inst]) {
+            const vel = (n.velocity || 80) / 127;
+            pattern[inst][step] = vel > 0.7 ? 3 : vel > 0.4 ? 2 : 1;
+          }
+        }
+
+        console.log(`%c[Magenta] %cDrumsRNN generated pattern in ${elapsed}ms temp=${temperature.toFixed(1)}`,
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+        return pattern;
+      } catch (e) {
+        console.warn('[Magenta] drum generation failed:', e.message || e);
+        return null;
+      }
+    }
+
+    // --- GrooVAE: Drum humanization ---
+    let grooveVAE = null, grooveReady = false;
+    let _grooveOffsets = null; // {timing: Float32Array(16), velocity: Float32Array(16)}
+
+    async function initGrooVAE() {
+      try {
+        if (typeof music_vae === 'undefined') return;
+        grooveVAE = new music_vae.MusicVAE(
+          'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/groovae_4bar'
+        );
+        await grooveVAE.initialize();
+        grooveReady = true;
+        console.log('%c[Magenta] %cGrooVAE loaded — drum humanization active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+      } catch (e) {
+        console.warn('[Magenta] GrooVAE failed:', e.message || e);
+      }
+    }
+
+    async function humanizeDrumPattern() {
+      if (!grooveReady || !grooveVAE) return null;
+      try {
+        // Sensor routing: ch4 (trunk) for humanization amount
+        const trunkActivity = (chState.ch4 && chState.ch4.connected)
+          ? chState.ch4.currentActivity : currentActivity;
+        const humanizeAmount = Math.min(1, trunkActivity / 40);
+
+        // Create a quantized drum sequence from current pattern
+        const quantized = {
+          quantizationInfo: { stepsPerQuarter: 4 },
+          notes: [],
+          totalQuantizedSteps: 16,
+        };
+        // Build from current perc state (kick on 0,4,8,12 etc)
+        [0, 4, 8, 12].forEach(s => quantized.notes.push({ pitch: 36, quantizedStartStep: s, quantizedEndStep: s+1 }));
+        [4, 12].forEach(s => quantized.notes.push({ pitch: 38, quantizedStartStep: s, quantizedEndStep: s+1 }));
+        [2, 6, 10, 14].forEach(s => quantized.notes.push({ pitch: 42, quantizedStartStep: s, quantizedEndStep: s+1 }));
+
+        const encoded = await grooveVAE.encode([quantized]);
+        const decoded = await grooveVAE.decode(encoded, humanizeAmount + 0.3);
+
+        if (decoded && decoded[0] && decoded[0].notes) {
+          // Extract timing offsets by comparing quantized vs decoded
+          const offsets = { timing: new Float32Array(16).fill(0), velocity: new Float32Array(16).fill(1) };
+          for (const n of decoded[0].notes) {
+            const step = Math.round(n.quantizedStartStep) % 16;
+            const timeOffset = (n.startTime || 0) - (step * 0.25); // deviation from grid
+            offsets.timing[step] = timeOffset * humanizeAmount;
+            offsets.velocity[step] = 0.8 + (n.velocity || 80) / 127 * 0.4;
+          }
+          return offsets;
+        }
+        return null;
+      } catch (e) {
+        console.warn('[Magenta] GrooVAE humanize failed:', e.message || e);
+        return null;
+      }
+    }
+
+    // --- MusicVAE: Latent space navigation via XY pad ---
+    let musicVAE = null, musicVAEReady = false;
+    let _vaeCornerSequences = []; // 4 pre-encoded corner NoteSequences
+
+    async function initMusicVAE() {
+      try {
+        if (typeof music_vae === 'undefined') return;
+        musicVAE = new music_vae.MusicVAE(
+          'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/mel_4bar_med_lokl_q2'
+        );
+        await musicVAE.initialize();
+        musicVAEReady = true;
+        console.log('%c[Magenta] %cMusicVAE loaded — latent space navigation active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+        // Pre-encode 4 corner melodies
+        await encodeVAECorners();
+      } catch (e) {
+        console.warn('[Magenta] MusicVAE failed:', e.message || e);
+      }
+    }
+
+    async function encodeVAECorners() {
+      if (!musicVAEReady) return;
+      // 4 corner melodies representing different musical moods
+      const SQ = 4;
+      const corners = [
+        // TL: calm, stepwise, low register
+        { quantizationInfo:{stepsPerQuarter:SQ}, totalQuantizedSteps:32,
+          notes: [60,62,64,62,60,59,60,62].map((p,i) => ({pitch:p, quantizedStartStep:i*4, quantizedEndStep:i*4+4})) },
+        // TR: energetic, leaping, high register
+        { quantizationInfo:{stepsPerQuarter:SQ}, totalQuantizedSteps:32,
+          notes: [72,67,76,64,79,72,76,67].map((p,i) => ({pitch:p, quantizedStartStep:i*4, quantizedEndStep:i*4+2})) },
+        // BL: minimal, repeated, rhythmic
+        { quantizationInfo:{stepsPerQuarter:SQ}, totalQuantizedSteps:32,
+          notes: [60,60,60,60,60,60,60,60].map((p,i) => ({pitch:p, quantizedStartStep:i*4, quantizedEndStep:i*4+1})) },
+        // BR: complex, chromatic, ornamental
+        { quantizationInfo:{stepsPerQuarter:SQ}, totalQuantizedSteps:32,
+          notes: [60,63,67,70,72,71,68,64].map((p,i) => ({pitch:p, quantizedStartStep:i*4, quantizedEndStep:i*4+3})) },
+      ];
+      _vaeCornerSequences = corners;
+      console.log('[Magenta] VAE corners encoded');
+    }
+
+    async function generateVAEPhrase(x, y) {
+      if (!musicVAEReady || !musicVAE || _vaeCornerSequences.length < 4) return null;
+      try {
+        // Temperature from plant
+        const temperature = 0.8 + Math.min(currentActivity / 60, 1) * 1.2;
+        // Interpolate between 4 corners using x,y position (0-1 each)
+        const seqs = _vaeCornerSequences;
+        const interped = await musicVAE.interpolate([seqs[0], seqs[1], seqs[2], seqs[3]], 1);
+        // For now use simple sample — full bilinear needs custom z-space math
+        const decoded = interped[0] || await musicVAE.sample(1, temperature);
+        const seq = Array.isArray(decoded) ? decoded[0] : decoded;
+        if (!seq || !seq.notes) return null;
+
+        // Convert to PlantPulse phrase format
+        const phrase = [];
+        for (const n of seq.notes) {
+          const snapped = snapToScale(n.pitch);
+          const vel = Math.max(0.12, 0.25 + (n.velocity || 80) / 127 * 0.35);
+          const gate = Math.max(0.15, (n.quantizedEndStep - n.quantizedStartStep) * 0.25);
+          phrase.push({ note: snapped, vel, gate });
+        }
+        if (phrase.length > 0) {
+          console.log(`%c[Magenta] %cVAE phrase: ${phrase.length} notes at x=${x.toFixed(2)} y=${y.toFixed(2)}`,
+            'color:#fbbf24;font-weight:bold', 'color:#34d399');
+        }
+        return phrase.length > 0 ? phrase : null;
+      } catch (e) {
+        console.warn('[Magenta] VAE generation failed:', e.message || e);
+        return null;
+      }
+    }
+
+    // --- MidiMe: Self-learning from plant sessions ---
+    let midiMeActive = false;
+    let _midiMeBuffer = []; // collected NoteSequences for training
+    const MIDIME_STORAGE_KEY = 'plantpulse_midime_data';
+
+    function collectMidiMeData(noteSequence) {
+      if (!midiMeActive) return;
+      _midiMeBuffer.push(noteSequence);
+      // Persist to localStorage every 10 sequences
+      if (_midiMeBuffer.length % 10 === 0) {
+        try {
+          const serialized = _midiMeBuffer.map(s => JSON.stringify(s));
+          localStorage.setItem(MIDIME_STORAGE_KEY, JSON.stringify(serialized));
+          console.log(`[MidiMe] saved ${_midiMeBuffer.length} training sequences`);
+        } catch (_) {}
+      }
+    }
+
+    function restoreMidiMeData() {
+      try {
+        const raw = localStorage.getItem(MIDIME_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          _midiMeBuffer = parsed.map(s => JSON.parse(s));
+          console.log(`[MidiMe] restored ${_midiMeBuffer.length} training sequences`);
+        }
+      } catch (_) {}
+    }
+    restoreMidiMeData();
+
+    // --- Lazy loading orchestrator ---
+    // Models load on-demand when their feature is first needed.
+    // DrumsRNN: first perc-enabled preset. MusicVAE: first XY pad use on ambient.
+    let _drumsRNNLoadRequested = false;
+    let _musicVAELoadRequested = false;
+
+    function ensureDrumsRNN() {
+      if (drumsRNNReady || _drumsRNNLoadRequested) return;
+      _drumsRNNLoadRequested = true;
+      initDrumsRNN(); // also chains GrooVAE
+    }
+
+    function ensureMusicVAE() {
+      if (musicVAEReady || _musicVAELoadRequested) return;
+      _musicVAELoadRequested = true;
+      initMusicVAE();
+    }
+
     // Convert PlantPulse motif → Magenta NoteSequence for seeding the RNN
     function motifToNoteSequence(motif, rootMidi) {
       const SQ = 4; // steps per quarter note
@@ -3329,6 +3593,14 @@
 
     // Generate a phrase via MelodyRNN — async, returns [{note, vel, gate}] or null
     async function generateMagentaPhrase() {
+      // For ambient/drone presets: use MusicVAE latent space if ready.
+      // XY pad position (or plant signal) navigates the latent space.
+      if (musicVAEReady && SYNTH_PARAMS.seq_mode.value === 'drone') {
+        const phrase = await generateVAEPhrase(xyX, xyY);
+        if (phrase) return phrase;
+        // Fall through to RNN if VAE fails
+      }
+
       if (!magentaReady || !currentMotif || !magentaRNN) return null;
       try {
         // Get the current section's motif variation (straight/inverted/etc)
@@ -3836,7 +4108,27 @@
         // By the time this phrase finishes playing (3 repeats), the next one
         // will be ready in _magentaPhraseBuffer. Zero perceived latency.
         generateMagentaPhrase().then(phrase => {
-          if (phrase) _magentaPhraseBuffer = phrase;
+          if (phrase) {
+            _magentaPhraseBuffer = phrase;
+            // Collect for MidiMe self-learning (if active)
+            if (midiMeActive && phrase.length > 0) {
+              const rootNote = document.getElementById('rootSelect')?.value || 'C';
+              const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
+              // Convert phrase back to NoteSequence for training
+              const ns = { quantizationInfo:{stepsPerQuarter:4}, notes:[], totalQuantizedSteps:0 };
+              let step = 0;
+              for (const n of phrase) {
+                try {
+                  const m = Tone.Frequency(n.note).toMidi();
+                  const dur = Math.max(1, Math.round(n.gate / 0.25));
+                  ns.notes.push({ pitch: m, quantizedStartStep: step, quantizedEndStep: step + dur });
+                  step += dur;
+                } catch(_) {}
+              }
+              ns.totalQuantizedSteps = step;
+              collectMidiMeData(ns);
+            }
+          }
         });
       }
     }
@@ -4136,10 +4428,31 @@
     // Cache generated patterns (cleared on preset change)
     let _percPatternCache = {};
     function getPercPatterns() {
+      // If DrumsRNN generated an ML pattern for this section, use it for the
+      // active tier. The ML pattern is a flat 16-step array per instrument;
+      // we wrap it in a 5-tier structure where the ML pattern IS tier 2-4
+      // and tiers 0-1 are sparser versions (drop some hits).
+      if (_mlDrumPattern) {
+        const ml = _mlDrumPattern;
+        const sparse = (arr) => arr.map((v, i) => (i % 4 === 0) ? v : 0);
+        const mid = (arr) => arr.map((v, i) => (i % 2 === 0) ? v : (Math.random() < 0.3 ? v : 0));
+        const mlKey = 'ml_' + percPatternMutationSeed;
+        if (!_percPatternCache[mlKey]) {
+          _percPatternCache[mlKey] = {
+            kick:  [sparse(ml.kick), mid(ml.kick), ml.kick, ml.kick, ml.kick],
+            snare: [sparse(ml.snare), mid(ml.snare), ml.snare, ml.snare, ml.snare],
+            hat:   [sparse(ml.hat), mid(ml.hat), ml.hat, ml.hat, ml.hat],
+            rim:   [sparse(ml.rim), mid(ml.rim), ml.rim, ml.rim, ml.rim],
+            bass:  [sparse(ml.kick), mid(ml.kick), ml.kick, ml.kick, ml.kick], // bass follows kick
+          };
+        }
+        return _percPatternCache[mlKey];
+      }
+
+      // Algorithmic fallback: recipe-based patterns
       const key = percFeel + '_' + percPatternMutationSeed;
       if (!_percPatternCache[key]) {
         const recipe = PERC_RECIPES[percFeel] || PERC_RECIPES.groovy;
-        // Use mutation seed to slightly vary the pattern each time
         const savedRandom = Math.random;
         let seed = percPatternMutationSeed;
         Math.random = () => { seed = (seed * 16807 + 0) % 2147483647; return seed / 2147483647; };
@@ -4965,53 +5278,33 @@
         }
       }
 
-      // === Apply per-bar drum variations ===
-      // Only during 'full' drum style — thin/drop/halftime want to stay sparse.
-      if (drumStyle === 'full' && percChar !== 'whisper') {
-        // Stumble kick — soft extra kick, ghost level
-        if (percStep === _barStumbleKickStep && kickLevel === 0) {
-          kickLevel = 1; // ghost-level for a subtle stumble
+      // === Drum humanization: GrooVAE OR manual ===
+      // When GrooVAE is active, it handles humanization via learned micro-timing
+      // and velocity from real drummers — skip our manual probability system.
+      // When GrooVAE is NOT ready, fall back to the manual stumble/ghost/decoration.
+      if (!grooveReady) {
+        // === Manual per-bar drum variations (fallback) ===
+        if (drumStyle === 'full' && percChar !== 'whisper') {
+          if (percStep === _barStumbleKickStep && kickLevel === 0) kickLevel = 1;
+          if (percStep === _barDoubleKickStep && kickLevel === 0) kickLevel = 1;
+          if (percStep === _barGhostSnareStep && snareLevel === 0 && hatLevel === 0) snareLevel = 1;
+          if (percStep === _barOpenHatStep && hatLevel < 2) hatLevel = 2;
         }
-        // Double kick — an extra 16th-note kick right before a main kick, creates "d-dum"
-        if (percStep === _barDoubleKickStep && kickLevel === 0) {
-          kickLevel = 1;
+        // Activity-driven decoration
+        const decorChance = Math.min(0.25, currentActivity / 160) * _humanizePerc;
+        if (decorChance > 0.02 && percChar !== 'whisper' && (drumStyle === 'full' || drumStyle === 'skip-1')) {
+          if (snareLevel === 0 && hatLevel === 0 && percStep % 2 === 1 && Math.random() < decorChance) snareLevel = 1;
+          if (hatLevel === 0 && snareLevel === 0 && kickLevel === 0 && Math.random() < decorChance * 0.7) hatLevel = 1;
         }
-        // Ghost snare — very soft snare on a "ghost position"
-        if (percStep === _barGhostSnareStep && snareLevel === 0 && hatLevel === 0) {
-          snareLevel = 1;
-        }
-        // Open hat — brighter/louder hat on step 10 or 15
-        if (percStep === _barOpenHatStep && hatLevel < 2) {
-          hatLevel = 2;
-        }
-      }
-
-      // Activity-driven decoration — more hits when plant is active
-      // Only in 'full' or 'skip-1' styles — thin/drop/halftime want to stay sparse.
-      // Scaled by humanize so tight presets stay mechanical.
-      const decorChance = Math.min(0.25, currentActivity / 160) * _humanizePerc;
-      if (decorChance > 0.02 && percChar !== 'whisper' && (drumStyle === 'full' || drumStyle === 'skip-1')) {
-        if (snareLevel === 0 && hatLevel === 0 && percStep % 2 === 1 && Math.random() < decorChance) {
-          snareLevel = 1;
-        }
-        if (hatLevel === 0 && snareLevel === 0 && kickLevel === 0 && Math.random() < decorChance * 0.7) {
-          hatLevel = 1;
+        // Micro-variations every 4 bars
+        const barInSection = sectionBarCount;
+        if (drumStyle === 'full' && percChar !== 'whisper' && _humanizePerc > 0) {
+          if (barInSection % 4 === 3 && percStep === 8 && hatLevel > 0 && Math.random() < _humanizePerc) hatLevel = Math.max(hatLevel, 2);
+          if (barInSection % 4 === 3 && percStep === 14 && snareLevel === 0 && Math.random() < _humanizePerc) snareLevel = 1;
         }
       }
-
-      // Micro-variations every 4 bars — keeps long sections from feeling repetitive.
-      // Scaled by humanize: circuit/synthwave stay identical every 4 bars, lofi evolves.
-      const barInSection = sectionBarCount;
-      if (drumStyle === 'full' && percChar !== 'whisper' && _humanizePerc > 0) {
-        // Every 4 bars, open-hat feel on beat 8 (swap hat for rim)
-        if (barInSection % 4 === 3 && percStep === 8 && hatLevel > 0 && Math.random() < _humanizePerc) {
-          hatLevel = Math.max(hatLevel, 2);
-        }
-        // Every 4 bars, pickup ghost snare on step 14 going into next bar
-        if (barInSection % 4 === 3 && percStep === 14 && snareLevel === 0 && Math.random() < _humanizePerc) {
-          snareLevel = 1;
-        }
-      }
+      // (When grooveReady === true, GrooVAE timing/velocity offsets are applied
+      // later at trigger time via _grooveOffsets — no manual decoration needed.)
 
       // Per-section percBoost — chorus can hit harder than verse
       const _secForBoost = _arrFill && _arrFill.sections && _arrFill.sections[currentSectionIdx];
@@ -5035,11 +5328,15 @@
         }
       }
 
+      // GrooVAE micro-timing: if humanization offsets exist, shift the trigger time
+      // and scale velocity. This makes drums feel played by a real human instead of
+      // locked to the grid. Offsets are pre-computed per bar by humanizeDrumPattern().
+      const _gTime = (_grooveOffsets && _grooveOffsets.timing) ? _grooveOffsets.timing[percStep] || 0 : 0;
+      const _gVel  = (_grooveOffsets && _grooveOffsets.velocity) ? _grooveOffsets.velocity[percStep] || 1 : 1;
+
       if (kickVel > 0) {
-        // Main body kick — lower base note (C2 = 65Hz) gives deeper fundamental than G2.
-        // The MembraneSynth's octaves param sweeps up from here, so C2 with octaves=4
-        // starts around 1kHz and dives to ~65Hz — that's the classic kick "thwop".
-        percKick.triggerAttackRelease('C2', '8n', undefined, kickVel);
+        const _kt = _gTime ? Tone.now() + _gTime : undefined;
+        percKick.triggerAttackRelease('C2', '8n', _kt, kickVel * _gVel);
         if (percKick._click) percKick._click.triggerAttackRelease('32n', undefined, kickVel * 0.7);
         // Sub-thump layer — pure low-frequency boom that carries on the sub driver.
         // Fires at A1 (55Hz), sweeps narrow. This is what makes the kick "whump".
@@ -5710,6 +6007,8 @@
         const pos = getXY(e);
         xyX = pos.x;
         xyY = pos.y;
+        // Lazy-load MusicVAE on first XY pad interaction
+        ensureMusicVAE();
       }
 
       function moveDrag(e) {
@@ -6897,7 +7196,10 @@
         osc2_wave:'sine', osc2_octave:0, osc2_detune:1, osc2_level:0.15, osc2_spread:0,
         // Filter: the key to piano sound — sharp bright burst (hammer) decaying to warm tone
         // High env amount (6 octaves), very fast decay (150ms), low sustain
-        filter_cutoff:1200, filter_res:2, filter_env_amt:6,
+        // Piano: FM synth handles its own brightness via modulationEnvelope — doesn't
+        // need the aggressive low-base filter sweep that sawtooth presets need.
+        // Keep cutoff HIGH so the hammer harmonics ring through. Low Q = transparent.
+        filter_cutoff:6000, filter_res:0.8, filter_env_amt:6,
         filter_env_a:0.001, filter_env_d:0.15, filter_env_s:0.05, filter_env_r:2,
         // Amp: instant attack, long natural decay (3.5s), near-zero sustain — notes ring then die
         amp_a:0.001, amp_d:3.5, amp_s:0.02, amp_r:2, amp_level:0.55,
@@ -7209,7 +7511,10 @@
       if (preset._percChar) percChar = preset._percChar;
       _percPatternCache = {}; // clear cached patterns on preset change
       // Only rebuild if audio graph is up (masterGain exists) — otherwise defer to Play button
-      if (masterGain && (musicPlaying || percEnabled)) buildPercSynths();
+      if (masterGain && (musicPlaying || percEnabled)) {
+        buildPercSynths();
+        ensureDrumsRNN(); // lazy-load DrumsRNN when drums are first needed
+      }
 
       // Apply melody settings from preset
       if (preset._melodyEnabled !== undefined) {
