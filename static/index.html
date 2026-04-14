@@ -12,6 +12,7 @@
   <!-- Magenta.js ML music suite (Apache 2.0). Full UMD bundle exposes global `mm` namespace.
        Includes MusicRNN (MelodyRNN, DrumsRNN, ImprovRNN), MusicVAE (trio, groove, melody),
        and utilities. Falls back to algorithmic if CDN fails. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.7.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1"></script>
   <!-- MQTT is proxied through the backend via SSE — no client-side MQTT needed -->
   <style>
@@ -1376,6 +1377,10 @@
         currentActivity: 0,
         currentSmoothed: 0,
         connected: false,
+        volatilityBuffer: [],
+        currentVolatility: 0,
+        volatilityTrend: 0,
+        _trendSmoothed: 0,
       };
     }
 
@@ -1404,6 +1409,15 @@
     let currentRawValue = 0;
     let currentActivity = 0;
     let currentSmoothed = 0;
+
+    // Volatility: rolling stddev over ~10s window — the real "energy" signal.
+    // Unlike currentActivity (instant delta), this captures how much the signal
+    // has been moving around. A plant swinging ±30mV every 2s is more energetic
+    // than one drifting ±100mV over 5 minutes.
+    const VOLATILITY_WINDOW = 30; // ~10s at 3Hz sample rate
+    let currentVolatility = 0;    // 0-100, normalized rolling stddev
+    let volatilityTrend = 0;     // -1 to +1: plant calming (-) or waking (+)
+    let _trendSmoothed = 0;
 
     // Signal range (auto-calibrates from observed data)
     let signalMin = -3;
@@ -1552,6 +1566,8 @@
       'fixed',
       // Legacy (active channel)
       'plant_raw','plant_smooth','plant_activity',
+      'plant_volatility',  // rolling stddev — the "real" energy signal
+      'plant_trend',       // is plant calming or waking (-1 to +1 → 0 to 1)
       // Per-channel
       'ch1_raw','ch1_smooth','ch1_activity',
       'ch2_raw','ch2_smooth','ch2_activity',
@@ -1586,6 +1602,14 @@
         case 'plant_raw': return normCh(activeChannel, 'raw');
         case 'plant_smooth': return normCh(activeChannel, 'smooth');
         case 'plant_activity': return normCh(activeChannel, 'activity');
+        case 'plant_volatility': {
+          const vst = chState[activeChannel];
+          return vst ? vst.currentVolatility / 100 : 0;
+        }
+        case 'plant_trend': {
+          const tst = chState[activeChannel];
+          return tst ? (tst.volatilityTrend + 1) / 2 : 0.5; // 0=calming, 0.5=stable, 1=waking
+        }
 
         // Derived: divergence between clip pairs (0 = identical, 1 = max divergence)
         case 'diff_12': {
@@ -1859,7 +1883,9 @@
       const vr = preset && preset._voiceRange;
       if (!vr) return;
 
-      const actNorm = Math.min(1, currentActivity / 50);
+      // Use volatility instead of instant activity when preset requests it
+      const energy = (preset._energySource === 'volatility') ? currentVolatility : currentActivity;
+      const actNorm = Math.min(1, energy / 50);
 
       // Spotlight rotation: rotate through preset._spotlight every 4 bars
       let spotlightVoice = null;
@@ -1970,7 +1996,7 @@
         const spot = preset._spotlight;
         const spotVoice = spot && spot.length > 0 ? spot[Math.floor(barCount / 4) % spot.length] : '-';
         console.log(
-          `%c[${currentPresetName}] %cbar ${barCount} %cact=${currentActivity.toFixed(1)}% style=${style} spot=${spotVoice}`,
+          `%c[${currentPresetName}] %cbar ${barCount} %cact=${currentActivity.toFixed(1)}% vol=${currentVolatility.toFixed(1)}%${volatilityTrend > 0.05 ? '↑' : volatilityTrend < -0.05 ? '↓' : '—'} style=${style} spot=${spotVoice}`,
           'color:#d4956a;font-weight:bold', 'color:#34d399', 'color:#8896b0'
         );
       }
@@ -2172,6 +2198,7 @@
     // Voice name → role lookup. Voice names are what the sequencer / voiceLevels / motif code use.
     const VOICE_TO_ROLE = {
       melody:    'lead',
+      'perf-rnn':'lead',   // Performance RNN → same FM piano lead/lead_active
       drone:     'pad',
       'gen-bass':'bass',
       'gen-arp': 'arp',
@@ -2653,7 +2680,7 @@
         // Per-source pan offset on top of the modulated pan knob value
         const basePan = getModValue('pan');
         let panOffset = 0;
-        if (_noteLogSrc === 'melody') panOffset = Math.sin(Date.now() / 2000) * 0.3;
+        if (_noteLogSrc === 'melody' || _noteLogSrc === 'perf-rnn') panOffset = Math.sin(Date.now() / 2000) * 0.3;
         else if (_noteLogSrc === 'gen-arp' || _noteLogSrc === 'seq-arp') panOffset = -Math.sin(Date.now() / 2000) * 0.2;
         else if (_noteLogSrc === 'gen-mel') panOffset = Math.sin(Date.now() / 3000) * 0.25;
         else if (_noteLogSrc === 'gen-bass' || _noteLogSrc === 'bass') panOffset = -basePan * 0.8; // pull bass toward center
@@ -2710,7 +2737,8 @@
     function buildChord(rootNote, rootIdx) {
       const notes = currentNotes;
       const n = notes.length;
-      const act = currentActivity;
+      const _p = FACTORY_PRESETS[currentPresetName];
+      const act = (_p && _p._energySource === 'volatility') ? currentVolatility : currentActivity;
       const safeNote = (i) => notes[Math.max(0, Math.min(n - 1, i))];
       const maxSize = (ARRANGEMENT_LAYERS[arrangementState] || {}).chordSize || 3;
 
@@ -2918,16 +2946,19 @@
 
         // Plant-driven step shifting: activity can move bass/arp hits by ±1 step
         // and skip steps entirely when plant is very quiet
-        const actNorm = Math.min(1, currentActivity / 40);
-        // At low activity, probability of playing any non-bass step drops
-        const playChance = 0.4 + actNorm * 0.6; // 40% at zero activity, 100% at 40%+
+        const _presetRef = FACTORY_PRESETS[currentPresetName];
+        const _useVol = _presetRef && _presetRef._energySource === 'volatility';
+        const _energy = _useVol ? currentVolatility : currentActivity;
+        const actNorm = Math.min(1, _energy / 40);
+        // At low energy, probability of playing any non-bass step drops
+        const playChance = 0.4 + actNorm * 0.6; // 40% at zero energy, 100% at 40%+
 
-        // Bass — plant-driven density: quiet = just root, active = full chord
+        // Bass — energy-driven density: quiet = just root, active = full chord
         // Piano-like presets spread the chord over time (Alberti bass) instead of stacking
-        const bassShift = (currentActivity > 20 && Math.random() < 0.15) ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        const bassShift = (_energy > 20 && Math.random() < 0.15) ? (Math.random() < 0.5 ? -1 : 1) : 0;
         const shiftedBass = layout.bass.map(s => ((s + bassShift) + 16) % 16);
         const genBarIdx = Math.floor(Date.now() / (getSeqBeatMs() * 4)) % 4; // 4-bar cycle
-        // Activity determines chord density on this bar
+        // Energy determines chord density on this bar
         const chordDensity = actNorm; // 0=root only, 0.5=root+5th, 1=full triad
         // Every 4 bars, skip the bass entirely for breathing space (1/4 chance)
         const restBar = (genBarIdx === 3 && Math.random() < 0.4);
@@ -3551,6 +3582,392 @@
       initImprovRNN();
     }
 
+    // --- Performance RNN: polyphonic piano with expressive timing + dynamics ---
+    // Custom LSTM model (not available through mm.MusicRNN). Uses TF.js
+    // basicLSTMCell for the 3-layer LSTM forward pass. The checkpoint is the
+    // multiconditioned variant: plant activity → note density, scale → pitch histogram.
+    let perfRNN = null, perfRNNReady = false;
+    let _perfRNNLoadRequested = false;
+    let _pianoPerformance = null;      // {notes, totalMs, startTime}
+    let _pianoPerformanceNext = null;  // pre-generated next phrase
+    let _pianoScheduledIds = [];       // setTimeout IDs for cleanup
+    let _perfRNNCooldown = 0;          // timestamp: retry after this time
+
+    // Event vocabulary constants
+    const PERF_NOTE_ON = 0;            // 0-127: NoteOn (MIDI pitch)
+    const PERF_NOTE_OFF = 128;         // 128-255: NoteOff (MIDI pitch)
+    const PERF_TIME_SHIFT = 256;       // 256-355: TimeShift (10ms increments, 10-1000ms)
+    const PERF_VELOCITY = 356;         // 356-387: VelocityChange (32 bins)
+    const PERF_EVENT_SIZE = 388;
+    const PERF_COND_SIZE = 21;         // 1 flag + 8 density bins + 12 pitch histogram
+    const PERF_DENSITY_BINS = 8;
+    const PERF_PITCH_CLASSES = 12;
+
+    const PERF_CHECKPOINT_URL = '/static/models/performance_rnn';
+
+    // Resolve tf — @magenta/music bundles TF.js but may not expose it globally
+    const _tf = (typeof tf !== 'undefined') ? tf : (typeof mm !== 'undefined' && mm.tf) ? mm.tf : null;
+
+    function buildPerfRNNFromWeights(vars) {
+      const lstmLayers = [];
+      for (let i = 0; i < 3; i++) {
+        lstmLayers.push({
+          kernel: vars[`rnn/multi_rnn_cell/cell_${i}/basic_lstm_cell/kernel`],
+          bias:   vars[`rnn/multi_rnn_cell/cell_${i}/basic_lstm_cell/bias`],
+        });
+      }
+      const fcW = vars['fully_connected/weights'];
+      const fcB = vars['fully_connected/biases'];
+      const hiddenSize = lstmLayers[0].bias.shape[0] / 4; // 2048/4 = 512
+      return { lstmLayers, fcW, fcB, hiddenSize };
+    }
+
+    // Manual LSTM cell: concat([input, h]) * kernel + bias → split into 4 gates
+    function lstmCell(input, c, h, kernel, bias) {
+      const concat = input.concat(h, 1);            // [1, inputSize + hiddenSize]
+      const gates = concat.matMul(kernel).add(bias); // [1, 4 * hiddenSize]
+      const hs = kernel.shape[1] / 4;
+      const i = gates.slice([0, 0],     [1, hs]).sigmoid();
+      const j = gates.slice([0, hs],    [1, hs]).tanh();
+      const f = gates.slice([0, hs * 2],[1, hs]).add(_tf.scalar(1.0)).sigmoid(); // +1 = forget bias
+      const o = gates.slice([0, hs * 3],[1, hs]).sigmoid();
+      const newC = f.mul(c).add(i.mul(j));
+      const newH = o.mul(newC.tanh());
+      return [newC, newH];
+    }
+
+    function initPerfRNNState(model) {
+      const h = model.hiddenSize;
+      return {
+        c: [_tf.zeros([1, h]), _tf.zeros([1, h]), _tf.zeros([1, h])],
+        h: [_tf.zeros([1, h]), _tf.zeros([1, h]), _tf.zeros([1, h])],
+      };
+    }
+
+    function disposePerfRNNState(state) {
+      if (!state) return;
+      state.c.forEach(t => { try { t.dispose(); } catch(_){} });
+      state.h.forEach(t => { try { t.dispose(); } catch(_){} });
+    }
+
+    function perfRNNStep(model, eventIdx, conditioning, state) {
+      const oldC = [...state.c];
+      const oldH = [...state.h];
+
+      const logits = _tf.tidy(() => {
+        const eventOneHot = _tf.oneHot(_tf.tensor1d([eventIdx], 'int32'), PERF_EVENT_SIZE).as1D();
+        let input = conditioning.concat(eventOneHot).as2D(1, -1).toFloat();
+
+        // 3-layer stacked LSTM
+        for (let i = 0; i < 3; i++) {
+          const layer = model.lstmLayers[i];
+          const [newC, newH] = lstmCell(input, state.c[i], state.h[i], layer.kernel, layer.bias);
+          state.c[i] = _tf.keep(newC);
+          state.h[i] = _tf.keep(newH);
+          input = newH; // feed to next layer
+        }
+
+        return state.h[2].matMul(model.fcW).add(model.fcB); // [1, 388]
+      });
+
+      oldC.forEach(t => t.dispose());
+      oldH.forEach(t => t.dispose());
+      return logits;
+    }
+
+    function sampleFromLogits(logits, temperature) {
+      return _tf.tidy(() => {
+        const scaled = logits.as1D().div(Math.max(temperature, 0.01));
+        return _tf.multinomial(scaled.softmax(), 1).dataSync()[0];
+      });
+    }
+
+    // --- Plant → conditioning vector ---
+
+    function getNoteDensityConditioning(activity) {
+      // Map plant activity 0-100 to 8 bins (one-hot)
+      // Floor at bin 2 (~3 notes/sec) so even quiet plants get interesting piano,
+      // active plants push to bin 5-6 for dense passages
+      const rawBin = Math.floor(activity / (100 / PERF_DENSITY_BINS));
+      const bin = Math.min(PERF_DENSITY_BINS - 1, Math.max(2, rawBin));
+      const arr = new Float32Array(PERF_DENSITY_BINS);
+      arr[bin] = 1.0;
+      return arr;
+    }
+
+    function getPitchHistogramConditioning(root, scale) {
+      // Build 12-element vector: 1.0 for pitch classes in scale, 0.0 otherwise
+      const rootSemitone = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[root] || 0;
+      const intervals = SCALES[scale] || SCALES.major;
+      const hist = new Float32Array(PERF_PITCH_CLASSES);
+      for (const interval of intervals) {
+        hist[(rootSemitone + interval) % 12] = 1.0;
+      }
+      // Normalize to sum to 1
+      const sum = hist.reduce((a, b) => a + b, 0);
+      if (sum > 0) for (let i = 0; i < 12; i++) hist[i] /= sum;
+      return hist;
+    }
+
+    function buildConditioning(activity, root, scale) {
+      // 21-dim vector: [flag=0 (conditioned), density(8), pitchHistogram(12)]
+      const density = getNoteDensityConditioning(activity);
+      const pitchHist = getPitchHistogramConditioning(root, scale);
+      const cond = new Float32Array(PERF_COND_SIZE);
+      cond[0] = 0; // flag = 0 means "conditioned"
+      cond.set(density, 1);
+      cond.set(pitchHist, 1 + PERF_DENSITY_BINS);
+      return _tf.tensor1d(cond);
+    }
+
+    // --- Motif → Performance RNN seed events ---
+
+    function motifToPerfEvents(motif, rootMidi) {
+      const events = [];
+      const bpm = clockBPM || 72;
+      const stepMs = (60000 / bpm) / 4; // 16th note duration
+
+      // Initial velocity: moderate
+      events.push(PERF_VELOCITY + 16); // bin 16/32 ≈ mf
+
+      for (let i = 0; i < motif.intervals.length; i++) {
+        let pitch = rootMidi + motif.intervals[i];
+        pitch = Math.max(21, Math.min(108, pitch)); // piano range
+
+        // NoteOn
+        events.push(PERF_NOTE_ON + pitch);
+
+        // TimeShift for note duration
+        const durMs = (motif.rhythm[i] || 1) * stepMs;
+        let remaining = durMs;
+        while (remaining > 10) {
+          const shiftMs = Math.min(remaining, 1000);
+          const bin = Math.max(0, Math.round(shiftMs / 10) - 1);
+          events.push(PERF_TIME_SHIFT + Math.min(bin, 99));
+          remaining -= (bin + 1) * 10;
+        }
+
+        // NoteOff
+        events.push(PERF_NOTE_OFF + pitch);
+      }
+      return events;
+    }
+
+    // --- Decode generated events → playable note schedule ---
+
+    function decodePerfEvents(events) {
+      let timeMs = 0;
+      let velocity = 80;
+      const raw = []; // {type, pitch, velocity, timeMs}
+
+      for (const evt of events) {
+        if (evt < PERF_NOTE_OFF) {
+          raw.push({ type: 'on', pitch: evt, velocity, timeMs });
+        } else if (evt < PERF_TIME_SHIFT) {
+          raw.push({ type: 'off', pitch: evt - 128, timeMs });
+        } else if (evt < PERF_VELOCITY) {
+          timeMs += (evt - PERF_TIME_SHIFT + 1) * 10;
+        } else {
+          velocity = Math.round(((evt - PERF_VELOCITY) / 31) * 127);
+        }
+      }
+
+      // Pair NoteOn/NoteOff → note objects
+      const active = new Map();
+      const notes = [];
+      for (const r of raw) {
+        if (r.type === 'on') {
+          active.set(r.pitch, { velocity: r.velocity, startMs: r.timeMs });
+        } else if (r.type === 'off' && active.has(r.pitch)) {
+          const start = active.get(r.pitch);
+          notes.push({
+            pitch: r.pitch,
+            note: snapToScale(r.pitch),
+            velocity: start.velocity / 127,
+            startMs: start.startMs,
+            durationMs: Math.max(80, Math.min(3000, r.timeMs - start.startMs)), // cap 80ms-3s
+          });
+          active.delete(r.pitch);
+        }
+      }
+      // Close any unclosed notes
+      for (const [pitch, start] of active) {
+        notes.push({
+          pitch, note: snapToScale(pitch),
+          velocity: start.velocity / 127,
+          startMs: start.startMs,
+          durationMs: 500,
+        });
+      }
+      return { notes, totalMs: timeMs };
+    }
+
+    // --- Main generation function ---
+
+    async function generatePerfRNNPhrase() {
+      if (!perfRNNReady || !perfRNN || !currentMotif) return null;
+      if (Date.now() < _perfRNNCooldown) return null;
+
+      try {
+        const rootNote = document.getElementById('rootSelect')?.value || 'C';
+        const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
+        const scale = document.getElementById('scaleSelect')?.value || 'major';
+
+        // Seed from motif
+        const seedEvents = motifToPerfEvents(currentMotif, rootMidi);
+
+        // Temperature: higher base for more interesting output. Plant activity adds expressiveness.
+        // 0.8 = flowing and musical, 1.5 = adventurous and surprising
+        const temperature = 0.8 + Math.min(currentActivity / 60, 1) * 0.7;
+
+        // More events for denser, more interesting phrases
+        const targetEvents = 300 + Math.floor(Math.min(currentActivity, 100) / 100 * 200);
+        const bpm = clockBPM || 72;
+        const maxTimeMs = (60000 / bpm) * 4 * 4; // 4 bars
+
+        const t0 = Date.now();
+        const state = initPerfRNNState(perfRNN);
+        let conditioning = buildConditioning(currentActivity, rootNote, scale);
+
+        // Prime with seed events (no sampling)
+        for (const evt of seedEvents) {
+          const logits = perfRNNStep(perfRNN, evt, conditioning, state);
+          _tf.dispose(logits);
+        }
+
+        // Generate
+        const generated = [];
+        let lastEvent = seedEvents[seedEvents.length - 1];
+        let accumTimeMs = 0;
+
+        for (let i = 0; i < targetEvents; i++) {
+          const logits = perfRNNStep(perfRNN, lastEvent, conditioning, state);
+          const event = sampleFromLogits(logits, temperature);
+          _tf.dispose(logits);
+
+          generated.push(event);
+          lastEvent = event;
+
+          // Track accumulated time
+          if (event >= PERF_TIME_SHIFT && event < PERF_VELOCITY) {
+            accumTimeMs += (event - PERF_TIME_SHIFT + 1) * 10;
+            if (accumTimeMs >= maxTimeMs) break;
+          }
+
+          // Refresh conditioning every 50 events to track plant changes
+          if (i > 0 && i % 50 === 0) {
+            conditioning.dispose();
+            conditioning = buildConditioning(currentActivity, rootNote, scale);
+          }
+        }
+
+        conditioning.dispose();
+        disposePerfRNNState(state);
+
+        const { notes, totalMs } = decodePerfEvents(generated);
+        const elapsed = Date.now() - t0;
+
+        if (notes.length > 0) {
+          console.log(
+            `%c[Magenta] %cPerf RNN: ${notes.length} polyphonic notes, ${(totalMs/1000).toFixed(1)}s span, generated in ${elapsed}ms, temp=${temperature.toFixed(2)}`,
+            'color:#fbbf24;font-weight:bold', 'color:#34d399'
+          );
+        }
+        return notes.length > 0 ? { notes, totalMs, source: 'perf-rnn' } : null;
+      } catch (e) {
+        console.warn('[Magenta] Performance RNN generation failed:', e.message || e);
+        _perfRNNCooldown = Date.now() + 30000; // retry after 30s
+        return null;
+      }
+    }
+
+    // --- Polyphonic scheduling ---
+
+    function cancelPianoPerformance() {
+      _pianoScheduledIds.forEach(id => clearTimeout(id));
+      _pianoScheduledIds = [];
+      _pianoPerformance = null;
+    }
+
+    function schedulePianoPerformance(perfPhrase) {
+      if (!perfPhrase || !perfPhrase.notes || perfPhrase.notes.length === 0) return;
+
+      cancelPianoPerformance();
+      const startTime = Date.now();
+      _pianoPerformance = { ...perfPhrase, startTime };
+
+      // Normalize timing: subtract first note's start time so playback begins immediately
+      const timeOffset = perfPhrase.notes.length > 0 ? perfPhrase.notes[0].startMs : 0;
+
+      // Debug: log first 3 scheduled notes
+      const debugNotes = perfPhrase.notes.slice(0, 3).map(n =>
+        `${n.note} v=${n.velocity.toFixed(2)} @${n.startMs - timeOffset}ms dur=${n.durationMs}ms`
+      ).join(', ');
+      console.log(`%c[PerfRNN] %cScheduling ${perfPhrase.notes.length} notes (offset ${timeOffset}ms): ${debugNotes}`,
+        'color:#fbbf24;font-weight:bold', 'color:#93c5fd');
+
+      for (const n of perfPhrase.notes) {
+        const delay = Math.max(0, n.startMs - timeOffset);
+        const id = setTimeout(() => {
+          if (!musicPlaying || currentPresetName !== 'piano') return;
+          // Boost velocity — PerfRNN outputs are already 0-1 from MIDI, don't attenuate further
+          const vel = Math.max(0.15, n.velocity * 0.85) * Math.max(0.3, voiceLevels.melody);
+          const gate = Math.max(0.15, n.durationMs / 1000); // min 150ms for piano
+          _noteLogSrc = 'perf-rnn';
+          triggerNote(n.note, gate, vel);
+        }, delay);
+        _pianoScheduledIds.push(id);
+      }
+
+      // Adjusted duration after time offset normalization
+      const adjustedTotalMs = Math.max(2000, perfPhrase.totalMs - timeOffset);
+
+      // Pre-generate next phrase at 75% through
+      const pregenTime = adjustedTotalMs * 0.75;
+      _pianoScheduledIds.push(setTimeout(() => {
+        if (!musicPlaying || currentPresetName !== 'piano') return;
+        if (!_pianoPerformanceNext) {
+          generatePerfRNNPhrase().then(next => { _pianoPerformanceNext = next; });
+        }
+      }, pregenTime));
+
+      // Schedule crossfade to next phrase at the end
+      _pianoScheduledIds.push(setTimeout(() => {
+        if (!musicPlaying || currentPresetName !== 'piano') return;
+        if (_pianoPerformanceNext) {
+          schedulePianoPerformance(_pianoPerformanceNext);
+          _pianoPerformanceNext = null;
+        } else {
+          generatePerfRNNPhrase().then(next => {
+            if (next) schedulePianoPerformance(next);
+          });
+        }
+      }, adjustedTotalMs));
+    }
+
+    async function initPerfRNN() {
+      try {
+        if (!_tf) {
+          console.warn('[Magenta] TF.js not available — Performance RNN disabled');
+          return;
+        }
+        const manifest = await fetch(PERF_CHECKPOINT_URL + '/weights_manifest.json').then(r => r.json());
+        const vars = await _tf.io.loadWeights(manifest, PERF_CHECKPOINT_URL + '/');
+        perfRNN = buildPerfRNNFromWeights(vars);
+        perfRNNReady = true;
+        console.log('%c[Magenta] %cPerformance RNN loaded — polyphonic piano active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+      } catch (e) {
+        console.warn('[Magenta] Performance RNN failed to load:', e.message || e);
+      }
+    }
+
+    function ensurePerfRNN() {
+      if (perfRNNReady || _perfRNNLoadRequested) return;
+      _perfRNNLoadRequested = true;
+      initPerfRNN();
+    }
+
     // Extract the current chord symbol from the drone for chord conditioning
     function getCurrentChordSymbol() {
       const root = document.getElementById('rootSelect')?.value || 'C';
@@ -3649,9 +4066,9 @@
     async function generateMagentaPhrase() {
       const mode = SYNTH_PARAMS.seq_mode.value;
 
-      // 1. PIANO: chord-conditioned improvisation (elegant, harmony-following)
+      // 1. PIANO: chord-conditioned improvisation (harmony-following, elegant)
       if (currentPresetName === 'piano') {
-        ensureImprovRNN(); // trigger load if not already
+        ensureImprovRNN();
         if (improvReady) {
           const phrase = await generatePianoPhrase();
           if (phrase) return phrase;
@@ -3743,7 +4160,24 @@
     };
 
     function getMelodyStyle() {
-      return MELODY_STYLES[currentPresetName] || MELODY_STYLES.default;
+      const base = MELODY_STYLES[currentPresetName] || MELODY_STYLES.default;
+      // Dinner pianist: volatility shapes how piano phrases are expressed
+      const _p = FACTORY_PRESETS[currentPresetName];
+      if (_p && _p._energySource === 'volatility') {
+        const volNorm = Math.min(1, currentVolatility / 60); // 0-1 over 0-60% volatility
+        return {
+          stepProb:   0.5 - volNorm * 0.15,           // high vol → more skips/leaps
+          skipProb:   0.2 + volNorm * 0.15,
+          leapProb:   0.05 + volNorm * 0.15,
+          repeatProb: 0.15 - volNorm * 0.1,            // high vol → less repetition
+          minLen:     Math.round(2 + volNorm * 2),      // 2-4 notes
+          maxLen:     Math.round(3 + volNorm * 4),      // 3-7 notes
+          gateBase:   0.6 - volNorm * 0.3,             // high vol → shorter, running notes
+          velStart:   0.3 + volNorm * 0.2,             // high vol → louder
+          velFade:    0.03 + volNorm * 0.03,           // high vol → steeper dynamics
+        };
+      }
+      return base;
     }
 
     // --- Motif System ---
@@ -4000,9 +4434,13 @@
       const notesPerOctave = Math.max(1, Math.floor(currentNotes.length / 4));
       const octOffset = melodyOctave;
 
-      // Clamp melody to the 2nd octave of the pool (middle register, avoids very high notes)
-      const rangeStart = Math.floor(notesPerOctave * 1);
-      const rangeEnd = Math.floor(notesPerOctave * 2) - 1;
+      // Dinner pianist: volatility expands the register. Low vol = low octave, high = wide.
+      const _pr = FACTORY_PRESETS[currentPresetName];
+      const _volDriven = _pr && _pr._energySource === 'volatility';
+      const _volNorm = _volDriven ? Math.min(1, currentVolatility / 60) : 0;
+      // Default: octave 1-2. Volatility shifts start down and extends end up.
+      const rangeStart = Math.floor(notesPerOctave * (1 - (_volDriven ? (1 - _volNorm) * 0.5 : 0)));
+      const rangeEnd = Math.floor(notesPerOctave * (2 + (_volDriven ? _volNorm * 1 : 0))) - 1;
       const rangeSize = Math.max(1, rangeEnd - rangeStart);
       let baseIdx = rangeStart + Math.floor(signalNorm * rangeSize);
       baseIdx = Math.max(rangeStart, Math.min(rangeEnd, baseIdx + Math.floor(octOffset * notesPerOctave * 0.5)));
@@ -4100,6 +4538,11 @@
     function melodyTick() {
       const arrLayers = ARRANGEMENT_LAYERS[arrangementState] || ARRANGEMENT_LAYERS.flowing;
       if (!melodyEnabled || !arrLayers.melodyActive || !musicPlaying || !osc1Synth) return;
+
+      // Performance RNN handles its own polyphonic scheduling via setTimeout —
+      // skip monophonic melody path to avoid doubling.
+      if (currentPresetName === 'piano' && _pianoPerformance) return;
+
       const now = Date.now();
 
       // Melody phrases play on odd steps (avoids stacking with drone/bass on beat 0/4/8/12)
@@ -5602,32 +6045,70 @@
         };
 
         if (!requiredReady()) {
-          // Show a gentle centered toast — doesn't touch button layout at all
           btn.disabled = true;
           btn.style.opacity = '0.5';
           const toast = document.createElement('div');
           toast.id = 'mlLoadToast';
           toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
             'background:rgba(10,18,32,0.92);border:1px solid rgba(52,211,153,0.25);' +
-            'border-radius:8px;padding:20px 32px;font-family:inherit;font-size:13px;' +
+            'border-radius:8px;padding:24px 36px;font-family:inherit;font-size:13px;' +
             'letter-spacing:1.5px;color:#34d399;z-index:999;text-align:center;' +
-            'backdrop-filter:blur(8px);animation:fade-up 0.4s ease both;';
+            'backdrop-filter:blur(8px);animation:fade-up 0.4s ease both;min-width:260px;';
           document.body.appendChild(toast);
+
           const _loadMsgs = [
-            'Photosynthesizing...', 'Growing neural roots...', 'Absorbing sunlight...',
-            'Unfurling leaves...', 'Tuning chlorophyll...', 'Connecting to mycelium...',
-            'Budding melodies...', 'Composting algorithms...', 'Germinating beats...',
+            'Photosynthesizing neural pathways...',
+            'Growing roots through tensor soil...',
+            'Unfurling melodic leaves...',
+            'Tuning chlorophyll frequencies...',
+            'Connecting to the mycelium network...',
+            'Composting old algorithms...',
+            'Germinating polyphonic seeds...',
+            'Absorbing spectral sunlight...',
+            'Budding harmonic fractals...',
+            'Propagating rhythmic cuttings...',
+            'Watering the gradient descent...',
+            'Pruning dead neurons...',
           ];
+          // Shuffle messages
+          for (let i = _loadMsgs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [_loadMsgs[i], _loadMsgs[j]] = [_loadMsgs[j], _loadMsgs[i]];
+          }
+
+          // Build model checklist for progress
+          const modelChecks = [];
+          modelChecks.push({ name: 'MelodyRNN', check: () => magentaReady });
+          if (needsTrio) {
+            modelChecks.push({ name: 'DrumsRNN', check: () => drumsRNNReady });
+            modelChecks.push({ name: 'TrioVAE', check: () => trioReady });
+          }
+          if (needsImprov) modelChecks.push({ name: 'ImprovRNN', check: () => improvReady });
+
           let _loadMsgIdx = 0;
-          toast.textContent = _loadMsgs[0];
+          const renderToast = () => {
+            const loaded = modelChecks.filter(m => m.check()).length;
+            const total = modelChecks.length;
+            const pct = Math.round((loaded / total) * 100);
+            const checks = modelChecks.map(m =>
+              `<span style="opacity:${m.check() ? '1' : '0.35'}">${m.check() ? '●' : '○'} ${m.name}</span>`
+            ).join('&nbsp;&nbsp;');
+            toast.innerHTML =
+              `<div style="margin-bottom:10px;font-size:12px;letter-spacing:2px;opacity:0.7">${_loadMsgs[_loadMsgIdx]}</div>` +
+              `<div style="background:rgba(52,211,153,0.1);border-radius:4px;height:6px;margin:8px 0;overflow:hidden">` +
+              `<div style="height:100%;background:rgba(52,211,153,0.6);border-radius:4px;transition:width 0.4s ease;width:${pct}%"></div></div>` +
+              `<div style="font-size:10px;letter-spacing:1px;margin-top:8px">${checks}</div>`;
+          };
+          renderToast();
+
           await new Promise(resolve => {
             let elapsed = 0;
             const poll = setInterval(() => {
               elapsed += 300;
               if (elapsed % 2400 === 0) {
                 _loadMsgIdx = (_loadMsgIdx + 1) % _loadMsgs.length;
-                toast.textContent = _loadMsgs[_loadMsgIdx];
               }
+              renderToast();
               if (requiredReady() || elapsed > 25000) {
                 clearInterval(poll);
                 resolve();
@@ -5677,6 +6158,9 @@
         }
         percStep = 0;
         melodyPhrase = []; melodyPhraseIdx = 0;
+        // Clean up Performance RNN polyphonic scheduling
+        cancelPianoPerformance();
+        _pianoPerformanceNext = null;
         const percSec = document.getElementById('percSection');
         if (percSec) percSec.classList.remove('active');
         if (osc1Synth) osc1Synth.releaseAll();
@@ -7113,24 +7597,24 @@
         lfo1_rate:0.04, lfo1_wave:'sine', lfo1_depth:0.1,
         lfo2_rate:0, lfo2_wave:'sine', lfo2_depth:0, // no vibrato — pianos don't vibrate
         _mod:{
-          filter_cutoff:{ source:'plant_smooth', depth:0.4 },  // brightness follows voltage
-          osc2_level:{ source:'plant_smooth', depth:0.3 },     // body warmth follows plant
-          rev_wet:{ source:'plant_smooth', depth:0.3 },        // space grows with voltage
-          dly_wet:{ source:'plant_activity', depth:0.2 },      // subtle echo on activity
-          amp_level:{ source:'plant_smooth', depth:0.2 },      // gentle dynamics
+          filter_cutoff:{ source:'plant_volatility', depth:0.5 },  // brightness follows energy
+          osc2_level:{ source:'plant_smooth', depth:0.3 },         // body warmth follows plant
+          rev_wet:{ source:'plant_volatility', depth:0.3 },        // space grows with energy
+          dly_wet:{ source:'plant_volatility', depth:0.2 },        // echo on energy
+          amp_level:{ source:'plant_trend', depth:0.25 },          // waking = louder, calming = softer
         },
+        _energySource: 'volatility', // dinner pianist reads the room via volatility, not instant delta
         _perc: true, _percFeel: 'calm', _percChar: 'soft',
         _melodyEnabled: true, _melodyOctave: 0, _clockBPM: 72, _scale: 'major', _root: 'G',
-        _macros: { space: 'plant_smooth', energy: 'plant_activity' },
+        _macros: { space: 'plant_smooth', energy: 'plant_volatility' },
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0.3,
         _track: { minDuration: 420, maxDuration: 720, rootPool: ['G', 'D', 'C', 'A'] },  // piano, 7-12 min, classical fifths
-        // Song structure: ambient pianist watching a plant grow
-        // 8 bars min / 20 bars max per section — ~27-67 seconds at 72 BPM
-        // Rolling 20-bar activity baseline; spike = current bar > 3x recent avg
+        // Dinner pianist: volatility drives voice presence.
+        // gen-bass always on (foundation), melody builds with energy.
         _voiceRange: {
-          melody: [0, 1.0], 'gen-bass': [0.8, 1.0], 'gen-arp': [0, 0.5],
-          'gen-mel': [0, 0.6], drone: [0.5, 0.7],
+          melody: [0, 1.0], 'gen-bass': [0.6, 1.0], 'gen-arp': [0, 0.7],
+          'gen-mel': [0, 0.5], drone: [0.5, 0.7],
         },
         _motifStyles: ['straight', 'ornamented', 'fragment', 'transposed'],
         _instruments: {
@@ -7292,6 +7776,8 @@
         }, 150);
       } catch(_) {}
       // --- Full state cleanup for preset switch ---
+      cancelPianoPerformance();
+      _pianoPerformanceNext = null;
       droneNotes = [];
       melodyPhrase = []; melodyPhraseIdx = 0;
       arpIndex = 0;                    // reset arp cycle position
@@ -8001,6 +8487,33 @@
       const pct = Math.min(100, (delta / 15) * 100);
       st.currentActivity += (pct - st.currentActivity) * 0.3;
 
+      // Volatility: rolling stddev over window
+      st.volatilityBuffer.push(avgMv);
+      if (st.volatilityBuffer.length > VOLATILITY_WINDOW) st.volatilityBuffer.shift();
+      if (st.volatilityBuffer.length >= 5) {
+        const vBuf = st.volatilityBuffer;
+        const vMean = vBuf.reduce((a, b) => a + b, 0) / vBuf.length;
+        const vVariance = vBuf.reduce((a, v) => a + (v - vMean) ** 2, 0) / vBuf.length;
+        const vStddev = Math.sqrt(vVariance);
+        // Normalize: stddev of 25mV (daytime peak from historical data) = 100%
+        const vNorm = Math.min(100, (vStddev / 25) * 100);
+        st.currentVolatility += (vNorm - st.currentVolatility) * 0.1;
+
+        // Trend: compare recent half vs older half stddev
+        const half = Math.floor(vBuf.length / 2);
+        if (half >= 3) {
+          const older = vBuf.slice(0, half);
+          const newer = vBuf.slice(half);
+          const oMean = older.reduce((a, b) => a + b, 0) / older.length;
+          const nMean = newer.reduce((a, b) => a + b, 0) / newer.length;
+          const oStd = Math.sqrt(older.reduce((a, v) => a + (v - oMean) ** 2, 0) / older.length);
+          const nStd = Math.sqrt(newer.reduce((a, v) => a + (v - nMean) ** 2, 0) / newer.length);
+          const rawTrend = (nStd - oStd) / Math.max(1, (nStd + oStd) / 2);
+          st._trendSmoothed += (rawTrend - st._trendSmoothed) * 0.05;
+          st.volatilityTrend = Math.max(-1, Math.min(1, st._trendSmoothed));
+        }
+      }
+
       // Update channel indicator
       const dot = document.getElementById('ch-dot-' + ch);
       const val = document.getElementById('ch-val-' + ch);
@@ -8012,6 +8525,8 @@
         currentRawValue = avgMv;
         currentSmoothed = st.emaSmoothed;
         currentActivity = st.currentActivity;
+        currentVolatility = st.currentVolatility;
+        volatilityTrend = st.volatilityTrend;
         rawMin = st.rawMin;
         rawMax = st.rawMax;
 
