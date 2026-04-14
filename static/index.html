@@ -1828,26 +1828,14 @@
       'gen-arp': 1.0, 'gen-mel': 1.0, 'seq-arp': 1.0,
     };
     let voiceLevelsTarget = { ...voiceLevels };
-    // Section-driven base targets — set by section transitions.
-    // voiceLevelsTarget is then computed per-tick from these PLUS plant activity modulation.
-    let sectionVoiceLevels = { ...voiceLevels };
 
-    // How each voice responds to plant activity. Positive = promoted when active,
-    // negative = dimmed when active. This makes the plant a CONDUCTOR that decides
-    // who's prominent at any moment.
-    const VOICE_ACTIVITY_SENSITIVITY = {
-      melody:     -0.12,  // lead dims slightly when active → makes room for fills/arps
-      'gen-bass':  0,     // bass stays steady
-      'gen-arp':   0.35,  // arps come alive when the plant is active
-      'gen-mel':   0.30,  // fills promoted when active → call-and-response with lead
-      'seq-arp':   0.35,  // arp mode also promoted
-      drone:      -0.08,  // drone dims slightly
-    };
-
-    // Section state
-    let currentSectionIdx = 0;
-    let sectionBarCount = 0;
-    // Rolling activity window for spike detection (bar-level stddev)
+    // Continuous arrangement state (replaces section graph)
+    let barCount = 0;              // global bar counter, resets on preset load / track transition
+    let motifStyleIdx = 0;         // index into preset._motifStyles, rotates on timer
+    let motifStyleBarCount = 0;    // bars since last motif style rotation
+    let phraseCount = 0;           // increments on melody phrase refresh, used as drum pattern seed
+    let lastSpikeTime = 0;         // for plant spike crash detection
+    // Rolling activity window for spike detection (bar-level)
     let barActivityWindow = []; // last 20 bar activity measurements
     const SECTION_SPIKE_MULTIPLIER = 3.0; // bar must be 3x recent avg to trigger
     const VOICE_ACTIVE_THRESHOLD = 0.05;  // voices below this are considered silent
@@ -1864,36 +1852,34 @@
     let _trackTransitioning = false;
 
     // Per-tick smoothing — called from musicTick
+    // Plant activity continuously drives voice levels through per-preset _voiceRange curves.
+    // Spotlight rotation promotes one voice at a time.
     function smoothVoiceLevels() {
-      // Compute voiceLevelsTarget from THREE layers:
-      //   1. Section targets (base level per voice from the arrangement)
-      //   2. Plant activity modulation (plant as conductor — promotes/dims voices)
-      //   3. Spotlight rotation (which instrument is "featured" right now)
+      const preset = FACTORY_PRESETS[currentPresetName];
+      const vr = preset && preset._voiceRange;
+      if (!vr) return;
 
       const actNorm = Math.min(1, currentActivity / 50);
 
-      // Spotlight: if the current section defines a `spotlight` array, rotate
-      // through it every 4 bars. The featured voice gets +0.25 boost, all
-      // others get -0.08. This creates "instrument takes a turn" moments
-      // WITHIN a section, not just between sections.
+      // Spotlight rotation: rotate through preset._spotlight every 4 bars
       let spotlightVoice = null;
-      const curSec = getCurrentSection();
-      if (curSec && curSec.spotlight && curSec.spotlight.length > 0) {
-        const spotIdx = Math.floor(sectionBarCount / 4) % curSec.spotlight.length;
-        spotlightVoice = curSec.spotlight[spotIdx];
+      const spotArr = preset._spotlight;
+      if (spotArr && spotArr.length > 0) {
+        const spotIdx = Math.floor(barCount / 4) % spotArr.length;
+        spotlightVoice = spotArr[spotIdx];
       }
 
       for (const v in voiceLevels) {
-        let base = sectionVoiceLevels[v] ?? 1.0;
-        // Activity modulation
-        const sens = VOICE_ACTIVITY_SENSITIVITY[v] || 0;
-        base = base + sens * actNorm;
+        const range = vr[v];
+        if (!range) continue;
+        // Linear interpolation from rest (range[0]) to peak (range[1]) based on plant activity
+        let base = range[0] + (range[1] - range[0]) * actNorm;
         // Spotlight boost/dim
         if (spotlightVoice) {
           if (v === spotlightVoice) {
-            base += 0.25; // featured voice gets louder
+            base += 0.25;
           } else if (base > 0.1) {
-            base -= 0.08; // others dim slightly to make room
+            base -= 0.08;
           }
         }
         voiceLevelsTarget[v] = Math.max(0, Math.min(1, base));
@@ -1906,13 +1892,6 @@
       }
     }
 
-    // Returns the current arrangement section object (or null if no arrangement)
-    function getCurrentSection() {
-      const preset = FACTORY_PRESETS[currentPresetName];
-      const arr = preset && preset._arrangement;
-      if (!arr || !arr.sections) return null;
-      return arr.sections[currentSectionIdx] || null;
-    }
 
     // Fires a one-shot crash cymbal on section entry — makes transitions audible.
     // Reuses percHat but opens the filter and extends the decay.
@@ -1936,212 +1915,87 @@
       } catch (e) {}
     }
 
-    // Start the breakdown riser — filtered noise that sweeps up and swells over
-    // the breakdown duration. The plant's activity during the breakdown drives
-    // the riser's volume, converting plant energy into musical tension.
-    function fireBreakdownRiser(durationSec) {
-      if (!riserNoise || !riserGain || !riserFilter) return;
-      try {
-        const tNow = Tone.now();
-        if (!_riserActive) {
-          riserNoise.start(tNow);
-          _riserActive = true;
-        }
-        // Filter sweep from 200Hz → 8kHz over the breakdown duration (exponential
-        // for more dramatic feel near the top)
-        riserFilter.frequency.cancelScheduledValues(tNow);
-        riserFilter.frequency.setValueAtTime(200, tNow);
-        riserFilter.frequency.exponentialRampToValueAtTime(8000, tNow + durationSec);
-        // Reset accumulated activity — will build during the breakdown
-        _breakdownActivity = 0;
-        // Start silent, will be modulated per-bar by updateBreakdownRiser based
-        // on accumulated activity
-        riserGain.gain.cancelScheduledValues(tNow);
-        riserGain.gain.setValueAtTime(0, tNow);
-      } catch (e) {}
-    }
 
-    // Per-bar update during an active breakdown. Accumulates activity and
-    // ramps the riser gain proportionally. High plant activity = loud riser.
-    function updateBreakdownRiser() {
-      if (!_riserActive || !riserGain) return;
-      _breakdownActivity += currentActivity;
-      // Target gain scales with accumulated activity, capped at 0.35
-      const target = Math.min(0.35, _breakdownActivity / 250);
-      try {
-        riserGain.gain.rampTo(target, 0.3);
-      } catch (e) {}
-    }
-
-    // Stop the riser — called on section transition OUT of a breakdown.
-    // Returns the accumulated activity so the caller can use it to boost the
-    // next section's entry crash intensity.
-    function stopRiser() {
-      if (!_riserActive || !riserNoise || !riserGain) return 0;
-      try {
-        const tNow = Tone.now();
-        riserGain.gain.cancelScheduledValues(tNow);
-        riserGain.gain.linearRampToValueAtTime(0, tNow + 0.15);
-        setTimeout(() => {
-          try { riserNoise.stop(); } catch (_) {}
-          _riserActive = false;
-        }, 200);
-      } catch (e) {}
-      const accumulated = _breakdownActivity;
-      _breakdownActivity = 0;
-      return accumulated;
-    }
-
-    // Helper: is this section a "breakdown" / tension build?
-    function isBreakdownSection(section) {
-      if (!section) return false;
-      if (section.drumStyle === 'drop') return true;
-      const nm = (section.name || '').toLowerCase();
-      return /breakdown|break|drop/.test(nm);
-    }
-
-    // Called at each bar start — rotates sections based on preset arrangement
-    function updateArrangementSection() {
+    // Called at each bar start — continuous arrangement driven by plant activity.
+    // No section graph — motif style rotates on a timer, plant spikes trigger crashes,
+    // track end is timer-based.
+    function updateContinuousArrangement() {
       if (!percBarStart) return;
       const preset = FACTORY_PRESETS[currentPresetName];
-      const arr = preset && preset._arrangement;
-      if (!arr || !arr.sections || arr.sections.length === 0) return;
+      if (!preset || !preset._voiceRange) return;
 
-      sectionBarCount++;
+      barCount++;
+      motifStyleBarCount++;
 
-      // Compute rolling avg BEFORE pushing current so avg represents "recent history"
+      // Compute rolling avg BEFORE pushing current
       let recentAvg = 0;
       if (barActivityWindow.length > 0) {
         recentAvg = barActivityWindow.reduce((a, b) => a + b, 0) / barActivityWindow.length;
       }
-
-      // Now push current activity
       barActivityWindow.push(currentActivity);
       if (barActivityWindow.length > 20) barActivityWindow.shift();
 
-      // Per-section minBars/maxBars override the preset default.
-      // Use case: a 4-bar breakdown drop inside an 8/16 arrangement.
-      const curSec = arr.sections[currentSectionIdx];
-      const secMin = curSec.minBars ?? arr.minBars ?? 8;
-      const secMax = curSec.maxBars ?? arr.maxBars ?? 20;
-      const canTransition = sectionBarCount >= secMin;
-      const forceTransition = sectionBarCount >= secMax;
-
-      // Spike trigger: current activity > 3x rolling average (need at least 5 bars of history)
-      let spikeTrigger = false;
-      if (canTransition && barActivityWindow.length >= 5 && recentAvg > 0.5 && currentActivity > recentAvg * SECTION_SPIKE_MULTIPLIER) {
-        spikeTrigger = true;
+      // Motif style rotation: every 8-16 bars (faster at high activity)
+      const rotationPeriod = Math.round(16 - Math.min(1, currentActivity / 50) * 8);
+      if (preset._motifStyles && preset._motifStyles.length > 0 && motifStyleBarCount >= rotationPeriod) {
+        const prevStyle = preset._motifStyles[motifStyleIdx % preset._motifStyles.length];
+        motifStyleIdx = (motifStyleIdx + 1) % preset._motifStyles.length;
+        motifStyleBarCount = 0;
+        console.log(
+          `%c[${currentPresetName}] %cmotif style → ${preset._motifStyles[motifStyleIdx]} %c(was ${prevStyle}, bar ${barCount})`,
+          'color:#d4956a;font-weight:bold', 'color:#34d399', 'color:#8896b0'
+        );
       }
 
-      // Per-bar debug log — shows current state
-      console.log(
-        `%c[${currentPresetName}] %c${curSec.name} %c bar ${sectionBarCount}/${secMax} ` +
-        `%cact=${currentActivity.toFixed(1)}% (avg=${recentAvg.toFixed(1)}%) ` +
-        `%ccan=${canTransition?'Y':'N'} spike=${spikeTrigger?'Y':'N'}`,
-        'color:#d4956a;font-weight:bold', 'color:#34d399', 'color:#8896b0', 'color:#6ea8fe', 'color:#a78bfa'
-      );
-
-      if (forceTransition || spikeTrigger) {
-        // === TRACK END CHECK — BEFORE the normal section advance ===
-        // If this section boundary would also trigger a track end, we want to skip
-        // the normal advance (no brief intro fragment before the fade) and go
-        // straight into the track transition.
-        if (shouldEndTrackAt(arr)) {
-          // Stop any active riser cleanly so it doesn't cut off mid-sweep
-          if (_riserActive) stopRiser();
-          maybeEndTrack();  // runs fade + regen + resets section to 0
-          return; // skip normal section advance
+      // Plant spike detection → crash accent (replaces section entry crashes)
+      if (barActivityWindow.length >= 5 && recentAvg > 0.5 &&
+          currentActivity > recentAvg * SECTION_SPIKE_MULTIPLIER) {
+        const now = Date.now();
+        if (now - lastSpikeTime > 8000) { // min 8s between spike crashes
+          fireSectionCrash(0.7);
+          lastSpikeTime = now;
+          console.log(
+            `%c⚡ SPIKE CRASH %cact=${currentActivity.toFixed(1)}% (avg=${recentAvg.toFixed(1)}%)`,
+            'color:#f472b6;font-weight:bold', 'color:#fbbf24'
+          );
         }
+      }
 
-        const prevName = curSec.name;
-        const wasBreakdown = isBreakdownSection(curSec);
+      // Track end check (timer-based)
+      checkTrackEnd();
 
-        // === SECTION GRAPH: weighted random next ===
-        // If the current section defines a `next` map { sectionName: weight },
-        // pick the next section by weighted random instead of cycling. This makes
-        // 20-minute tracks non-repetitive — the path through the song is never
-        // the same twice but always musically coherent.
-        // Fallback: if no `next` field, cycle as before.
-        if (curSec.next && typeof curSec.next === 'object') {
-          const candidates = Object.entries(curSec.next);
-          const totalWeight = candidates.reduce((sum, [, w]) => sum + w, 0);
-          let roll = Math.random() * totalWeight;
-          let picked = null;
-          for (const [name, weight] of candidates) {
-            roll -= weight;
-            if (roll <= 0) { picked = name; break; }
-          }
-          if (!picked) picked = candidates[0]?.[0];
-          // Find section by name
-          const pickedIdx = arr.sections.findIndex(s => s.name === picked);
-          currentSectionIdx = pickedIdx >= 0 ? pickedIdx : (currentSectionIdx + 1) % arr.sections.length;
-        } else {
-          currentSectionIdx = (currentSectionIdx + 1) % arr.sections.length;
-        }
-        sectionBarCount = 0;
-        const section = arr.sections[currentSectionIdx];
-        const nowBreakdown = isBreakdownSection(section);
-        // Set targets — smoothing ramps voiceLevels to match
-        for (const voice in section.voices) {
-          if (voiceLevelsTarget[voice] !== undefined) {
-            sectionVoiceLevels[voice] = section.voices[voice];
-          }
-        }
-
-        // Breakdown riser — DISABLED for now (felt out of place).
-
-        // Generate ML drum pattern for the new section (if DrumsRNN is ready).
-        // The ML pattern overrides the recipe-based one for this section.
-        if (drumsRNNReady && percEnabled && !isBreakdownSection(section)) {
-          generateMLDrumPattern().then(p => {
-            if (p) {
-              _mlDrumPattern = p;
-              _percPatternCache = {}; // clear cache so new pattern is used
-            }
-          });
-          // Also refresh GrooVAE humanization for the new section
-          if (grooveReady) {
-            humanizeDrumPattern().then(o => { if (o) _grooveOffsets = o; });
-          }
-        }
-
-        // Entry accent — fires a crash cymbal to announce the new section audibly.
-        // Defaults: 'crash' on named sections that typically lift (chorus/return/fuller).
-        // Presets can set `entryAccent: 'crash' | 'none'` explicitly.
-        const nm = (section.name || '').toLowerCase();
-        const defaultAccent = /chorus|return|fuller|together|drop|hit/.test(nm) ? 'crash' : 'none';
-        const accent = section.entryAccent ?? defaultAccent;
-        if (accent === 'crash') fireSectionCrash(0.7);
-        // Transition log — big and obvious
-        const reason = spikeTrigger ? 'SPIKE' : 'MAX_BARS';
+      // Per-bar debug log
+      if (barCount % 4 === 0) {
+        const style = getCurrentVariation();
+        const spot = preset._spotlight;
+        const spotVoice = spot && spot.length > 0 ? spot[Math.floor(barCount / 4) % spot.length] : '-';
         console.log(
-          `%c⇒ ${prevName} → ${section.name} %c(${reason}) ` +
-          `%cvoices: ${JSON.stringify(section.voices)} ` +
-          `%cshift=${section.octaveShift||0} boost=${section.percBoost||1} accent=${accent}`,
-          'color:#f472b6;font-weight:bold;font-size:13px', 'color:#fbbf24', 'color:#8896b0', 'color:#60a5fa'
+          `%c[${currentPresetName}] %cbar ${barCount} %cact=${currentActivity.toFixed(1)}% style=${style} spot=${spotVoice}`,
+          'color:#d4956a;font-weight:bold', 'color:#34d399', 'color:#8896b0'
         );
       }
     }
 
-    // Predicate: would this section boundary also end the track?
-    // Called BEFORE the normal section advance so we can skip the advance and
-    // go directly into the track transition (no brief intro fragment before fade).
-    function shouldEndTrackAt(arr) {
-      if (_trackTransitioning) return false;
+    // Timer-based track end check — replaces section-wrap trigger.
+    // Called every bar from updateContinuousArrangement().
+    function checkTrackEnd() {
+      if (_trackTransitioning) return;
       const preset = FACTORY_PRESETS[currentPresetName];
       const track = preset && preset._track;
-      if (!track) return false;
-      if (trackStartTime === 0 || (Date.now() - trackStartTime) > 24 * 3600 * 1000) return false;
+      if (!track) return;
+      if (trackStartTime === 0 || (Date.now() - trackStartTime) > 24 * 3600 * 1000) {
+        trackStartTime = Date.now();
+        return;
+      }
       const elapsed = (Date.now() - trackStartTime) / 1000;
-      if (elapsed >= track.maxDuration) return true;
-      // Would the NEXT section be 'intro' (index 0)? If so and past minDuration, end here.
-      const nextIdx = (currentSectionIdx + 1) % arr.sections.length;
-      if (elapsed >= track.minDuration && nextIdx === 0) return true;
-      return false;
+      // Past maxDuration: always end. Past minDuration: end on a 4-bar boundary for clean transition.
+      if (elapsed >= track.maxDuration || (elapsed >= track.minDuration && barCount % 4 === 0 && barCount > 0)) {
+        maybeEndTrack();
+      }
     }
 
     // Regenerates the motif and bass riff from current plant state, resets the
-    // track timer, and logs the new track number. Called from updateArrangementSection
+    // track timer, and logs the new track number. Called from checkTrackEnd()
     // when the track duration threshold has been met. If the preset declares a
     // rootPool, the key rotates through it — modulating between tracks like an album.
     //
@@ -2155,19 +2009,6 @@
       const preset = FACTORY_PRESETS[currentPresetName];
       const track = preset && preset._track;
       if (!track) return;  // ambient presets have no _track, never end
-      // Safety: if trackStartTime is 0 (never initialized) or wildly in the past,
-      // initialize it now and early-return. Prevents the "56-year elapsed" bug
-      // where a restored preset with uninitialized trackStartTime fires track-end
-      // on the first section wrap.
-      if (trackStartTime === 0 || (Date.now() - trackStartTime) > 24 * 3600 * 1000) {
-        trackStartTime = Date.now();
-        return;
-      }
-      const elapsed = (Date.now() - trackStartTime) / 1000;
-      const wrappedToIntro = (currentSectionIdx === 0);
-      const pastMin = elapsed >= track.minDuration;
-      const pastMax = elapsed >= track.maxDuration;
-      if (!(pastMax || (pastMin && wrappedToIntro))) return;
 
       // === TRANSITION BEGINS ===
       _trackTransitioning = true;
@@ -2226,6 +2067,15 @@
         currentMotif = generateMotif();
         currentBassRiff = generateBassRiff();
 
+        // Seed drums from the new motif rhythm (melody-aware drums)
+        if (drumsRNNReady && percEnabled) {
+          const drumSeed = motifToDrumSeed(currentMotif);
+          generateMLDrumPattern(drumSeed).then(p => {
+            if (p) { _mlDrumPattern = p; _percPatternCache = {}; }
+          });
+          if (grooveReady) humanizeDrumPattern().then(o => { if (o) _grooveOffsets = o; });
+        }
+
         // Rotate lead wave if the preset defines a leadWavePool.
         // Rebuilds the lead + lead_active instruments with a new waveform
         // so each track genuinely sounds like a different instrument playing.
@@ -2249,11 +2099,11 @@
           }
         }
 
-        // Always reset to section 0 for a fresh start on the new track.
-        // percStep and barActivityWindow also reset so the new track starts
-        // cleanly at beat 0 of bar 0, not mid-measure.
-        currentSectionIdx = 0;
-        sectionBarCount = 0;
+        // Reset continuous arrangement state for fresh start on new track.
+        barCount = 0;
+        motifStyleIdx = 0;
+        motifStyleBarCount = 0;
+        phraseCount = 0;
         percStep = 0;
         barActivityWindow = [];
 
@@ -2273,33 +2123,28 @@
       setTimeout(() => { _trackTransitioning = false; }, totalMs + 100);
     }
 
-    // Reset section state when a preset loads
+    // Reset arrangement state when a preset loads
     function resetArrangementSection() {
-      currentSectionIdx = 0;
-      sectionBarCount = 0;
+      barCount = 0;
+      motifStyleIdx = 0;
+      motifStyleBarCount = 0;
+      phraseCount = 0;
       barActivityWindow = [];
-      // Stop any active riser from the previous preset
-      if (_riserActive) stopRiser();
-      // First, reset all voices to 1.0 so old preset state doesn't bleed through
+      lastSpikeTime = 0;
+      // Reset all voices to rest position from _voiceRange
       for (const voice in voiceLevels) {
         voiceLevels[voice] = 1.0;
         voiceLevelsTarget[voice] = 1.0;
-        sectionVoiceLevels[voice] = 1.0;
       }
       const preset = FACTORY_PRESETS[currentPresetName];
-      const arr = preset && preset._arrangement;
-      if (arr && arr.sections && arr.sections.length > 0) {
-        // Start on the first section — override defaults with section values
-        const section = arr.sections[0];
-        for (const voice in section.voices) {
+      const vr = preset && preset._voiceRange;
+      if (vr) {
+        for (const voice in vr) {
           if (voiceLevels[voice] !== undefined) {
-            voiceLevels[voice] = section.voices[voice];
-            sectionVoiceLevels[voice] = section.voices[voice];
+            voiceLevels[voice] = vr[voice][0]; // start at rest level
+            voiceLevelsTarget[voice] = vr[voice][0];
           }
         }
-      } else {
-        // No arrangement — voices already at 1.0
-        // (nothing else to do)
       }
     }
 
@@ -2318,10 +2163,6 @@
     // Breakdown riser — persistent noise source + filter that harnesses plant
     // activity during breakdown sections as tension build. Filter sweeps up,
     // volume swells, releases into the next section for the drop.
-    let riserNoise = null, riserFilter = null, riserGain = null;
-    let _riserActive = false;
-    let _breakdownActivity = 0; // accumulated activity during current breakdown
-
     // --- Per-instrument (role) system ---
     // Each preset's _instruments config builds an `instruments` map of role → {synth, filter, dist, panner, gain, cfg, dispose, triggerAttackRelease}.
     // All role chains converge at `roleSumBus`, which feeds the shared chorus/delay/reverb chain.
@@ -2363,14 +2204,6 @@
       }).connect(lowShelf).start();
 
       masterGain = new Tone.Gain(0.4).connect(stereoWidener);
-
-      // Breakdown riser — noise source + highpass filter for tension build.
-      // Routes to masterGain so the section dip/fade still affects it.
-      // Gain starts at 0; triggered manually from updateArrangementSection.
-      riserGain = new Tone.Gain(0).connect(masterGain);
-      riserFilter = new Tone.Filter({ frequency: 200, type: 'highpass', Q: 1.5 }).connect(riserGain);
-      riserNoise = new Tone.Noise('white').connect(riserFilter);
-      riserNoise.volume.value = -6; // base level before gain modulation
 
       // Sub-bass synth — follows bass notes an octave below, pure sine.
       // Dropped to 0.08 — the new kickSub layer now provides sub-range energy,
@@ -3329,7 +3162,59 @@
     const MAGENTA_DRUM_MAP = { 36: 'kick', 38: 'snare', 42: 'hat', 46: 'hat', 49: 'rim', 51: 'rim' };
     const DRUM_TO_MAGENTA = { kick: 36, snare: 38, hat: 42, rim: 51 };
 
-    async function generateMLDrumPattern() {
+    // Convert motif rhythm positions to a DrumsRNN seed NoteSequence.
+    // Strong beats → kick, eighth beats → hat, offbeats → rim.
+    // This makes drums inherit the melody's rhythmic DNA.
+    function motifToDrumSeed(motif) {
+      if (!motif || !motif.rhythm) return null;
+      const notes = [];
+      let step = 0;
+      for (let i = 0; i < motif.rhythm.length; i++) {
+        const pos = step % 16;
+        let pitch;
+        if (pos % 4 === 0) pitch = 36;       // kick on quarter-note positions
+        else if (pos % 2 === 0) pitch = 42;  // hat on eighth-note positions
+        else pitch = 51;                       // rim on offbeats
+        notes.push({ pitch, quantizedStartStep: pos, quantizedEndStep: pos + 1 });
+        step += motif.rhythm[i]; // rhythm values are 16th-note durations
+      }
+      if (notes.length === 0) return null;
+      return {
+        quantizationInfo: { stepsPerQuarter: 4 },
+        notes,
+        totalQuantizedSteps: Math.max(1, ...notes.map(n => n.quantizedEndStep)),
+      };
+    }
+
+    // Convert an ML melody phrase [{note, vel, gate}] to a DrumsRNN seed.
+    function phraseToDrumSeed(phrase) {
+      if (!phrase || phrase.length === 0) return null;
+      const notes = [];
+      let step = 0;
+      for (const n of phrase) {
+        const pos = step % 16;
+        let pitch;
+        if (pos % 4 === 0) pitch = 36;
+        else if (pos % 2 === 0) pitch = 42;
+        else pitch = 51;
+        notes.push({ pitch, quantizedStartStep: pos, quantizedEndStep: pos + 1 });
+        step += Math.max(1, Math.round((n.gate || 0.25) / 0.25));
+      }
+      if (notes.length === 0) return null;
+      return {
+        quantizationInfo: { stepsPerQuarter: 4 },
+        notes,
+        totalQuantizedSteps: Math.max(1, ...notes.map(n => n.quantizedEndStep)),
+      };
+    }
+
+    // Motif density → max drum tier (5 notes → tier 2, 6 → tier 3, 7 → tier 4)
+    function getMotifDensityCeiling() {
+      if (!currentMotif || !currentMotif.intervals) return 4;
+      return Math.min(4, Math.max(0, currentMotif.intervals.length - 3));
+    }
+
+    async function generateMLDrumPattern(customSeed) {
       if (!drumsRNNReady || !drumsRNN) return null;
       try {
         // Sensor routing: ch4 (trunk) for drums, fallback to ch1
@@ -3337,8 +3222,8 @@
           ? chState.ch4.currentActivity : currentActivity;
         const temperature = 0.5 + Math.min(drumActivity / 50, 1) * 1.5;
 
-        // Create a minimal seed (just kick on beat 1)
-        const seed = {
+        // Use melody-aware seed if provided, otherwise minimal kick-on-1 fallback
+        const seed = customSeed || {
           quantizationInfo: { stepsPerQuarter: 4 },
           notes: [{ pitch: 36, quantizedStartStep: 0, quantizedEndStep: 1 }],
           totalQuantizedSteps: 1,
@@ -3360,7 +3245,7 @@
           }
         }
 
-        console.log(`%c[Magenta] %cDrumsRNN generated pattern in ${elapsed}ms temp=${temperature.toFixed(1)}`,
+        console.log(`%c[Magenta] %cDrumsRNN generated pattern in ${elapsed}ms temp=${temperature.toFixed(1)} seed=${seed.notes.length} notes`,
           'color:#fbbf24;font-weight:bold', 'color:#34d399');
         return pattern;
       } catch (e) {
@@ -3795,8 +3680,7 @@
       // 4. FALLBACK: MelodyRNN continuation from motif seed
       if (magentaReady && currentMotif && magentaRNN) {
         try {
-          const curSec = getCurrentSection();
-          const variationName = (curSec && curSec.motifStyle) || 'straight';
+          const variationName = getCurrentVariation();
           const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
           const variedMotif = variationFn(currentMotif);
           const rootNote = document.getElementById('rootSelect')?.value || 'C';
@@ -4101,17 +3985,13 @@
       }),
     };
 
-    // Pick a variation style based on current arrangement section
+    // Pick a variation style from the rotating _motifStyles array
     function getCurrentVariation() {
       const preset = FACTORY_PRESETS[currentPresetName];
-      const arr = preset && preset._arrangement;
-      if (!arr || !arr.sections || arr.sections.length === 0) return 'straight';
-      const section = arr.sections[currentSectionIdx];
-      // Section can specify a motifStyle, otherwise use position-based default
-      if (section.motifStyle) return section.motifStyle;
-      // Default rotation: solo=straight, fuller=ornamented, breakdown=fragment, return=transposed
-      const styles = ['straight', 'ornamented', 'fragment', 'transposed'];
-      return styles[currentSectionIdx % styles.length];
+      if (preset && preset._motifStyles && preset._motifStyles.length > 0) {
+        return preset._motifStyles[motifStyleIdx % preset._motifStyles.length];
+      }
+      return 'straight';
     }
 
     function generatePhrase(startActivity, signalNorm, signalDirection) {
@@ -4146,8 +4026,7 @@
         // Move the ENTIRE range up together so the chorus keeps the same width
         // and doesn't open a 2-octave window. Previous version extended rangeEnd
         // without moving rangeStart, which gave chorus a doubled range.
-        const curSec = getCurrentSection();
-        const octShift = (curSec && curSec.octaveShift) || 0;
+        const octShift = 0; // no section-based octave shift in freeflow mode
         const shiftedBase = baseIdx + octShift * notesPerOctave;
         const shiftedRangeStart = Math.max(0, rangeStart + octShift * notesPerOctave);
         const shiftedRangeEnd   = Math.min(currentNotes.length - 1, rangeEnd + octShift * notesPerOctave);
@@ -4165,7 +4044,7 @@
         return notes;
       }
 
-      // Fall back to random walk (for presets without _arrangement / motif)
+      // Fall back to random walk (for presets without _voiceRange / motif)
       const phraseLen = Math.max(style.minLen, Math.min(style.maxLen, Math.round(style.minLen + (startActivity / 15) * (melodyDensityVal / 5))));
       let curIdx = baseIdx;
       const degreesPerOctave = notesPerOctave;
@@ -4285,6 +4164,18 @@
         }
         melodyPhraseIdx = 0;
         melodyPhraseRepeat = 0;
+        phraseCount++;
+
+        // Re-seed drums from the new melody phrase (melody-aware drums)
+        if (drumsRNNReady && percEnabled) {
+          const drumSeed = melodyPhrase.length > 0
+            ? phraseToDrumSeed(melodyPhrase)
+            : motifToDrumSeed(currentMotif);
+          generateMLDrumPattern(drumSeed).then(p => {
+            if (p) { _mlDrumPattern = p; _percPatternCache = {}; }
+          });
+          if (grooveReady) humanizeDrumPattern().then(o => { if (o) _grooveOffsets = o; });
+        }
 
         // Pre-generate the NEXT phrase in the background via Magenta.
         // By the time this phrase finishes playing (3 repeats), the next one
@@ -4442,7 +4333,7 @@
     let _barGhostSnareStep = -1;
     let _barOpenHatStep = -1;
     let _barDoubleKickStep = -1;
-    let _barBreakdownFillEnabled = false; // dice roll at bar start for breakdown fills
+    // (breakdown fill dice removed — freeflow mode has no breakdown sections)
 
     // Per-preset drum patterns — each preset has unique rhythmic DNA
     let percFeel = 'groovy';
@@ -4657,11 +4548,14 @@
         density = resolveModSource(percDensitySource) * 50;
       }
       // Map smoothed activity to 0-4 tier (wider bands = more stable)
-      if (density < 2) return 0;
-      if (density < 6) return 1;
-      if (density < 15) return 2;
-      if (density < 30) return 3;
-      return 4;
+      let tier;
+      if (density < 2) tier = 0;
+      else if (density < 6) tier = 1;
+      else if (density < 15) tier = 2;
+      else if (density < 30) tier = 3;
+      else tier = 4;
+      // Cap by motif density — sparse motifs get sparser drums
+      return Math.min(tier, getMotifDensityCeiling());
     }
 
     // Per-preset percussion character
@@ -5218,23 +5112,12 @@
         // Smooth tier transitions — only allow ±1 per bar for musical flow
         if (targetTier > percLockedTier) percLockedTier = Math.min(percLockedTier + 1, targetTier);
         else if (targetTier < percLockedTier) percLockedTier = Math.max(percLockedTier - 1, targetTier);
-        // Pattern seed is locked per section (if arrangement exists), otherwise every 4-8 bars
-        // This keeps drums consistent within a section — drummer doesn't change patterns mid-verse
-        const arr = FACTORY_PRESETS[currentPresetName]?._arrangement;
-        if (arr) {
-          // Tie seed to current section index — changes only on section transition
-          const newSeed = currentSectionIdx * 17 + percLockedTier * 3;
-          if (newSeed !== percPatternMutationSeed) {
-            percPatternMutationSeed = newSeed;
-            _percPatternCache = {};
-          }
-        } else {
-          // Legacy: mutate every 4-8 bars for non-arrangement presets
-          const legacyPeriod = Math.floor(Date.now() / (getSeqBeatMs() * 4 * 6));
-          if (legacyPeriod !== percPatternMutationSeed) {
-            percPatternMutationSeed = legacyPeriod;
-            _percPatternCache = {};
-          }
+        // Pattern seed from phrase count — changes when melody phrases refresh.
+        // This keeps drums consistent within a phrase, but evolves with the melody.
+        const newSeed = phraseCount * 17 + percLockedTier * 3;
+        if (newSeed !== percPatternMutationSeed) {
+          percPatternMutationSeed = newSeed;
+          _percPatternCache = {};
         }
 
         // === Per-bar drum variations ===
@@ -5253,7 +5136,7 @@
         const _hasFlam    = _ornamentsAtBar.includes('flam') || _varAtBar > 0;
         const _hasGhost   = _ornamentsAtBar.includes('ghost') || _ghostAtBar > 0;
 
-        const _modBar = sectionBarCount % 4;
+        const _modBar = barCount % 4;
         // Stumble kick — bar-level 16th embellishment
         if (_hasStumble && _modBar !== 3 && Math.random() < 0.35 * _varAtBar) {
           const stumbleOptions = [3, 7, 11, 15];
@@ -5277,26 +5160,7 @@
           _barDoubleKickStep = Math.random() < 0.5 ? 7 : 11;
         }
 
-        // Breakdown fill dice — should THIS fill bar of a breakdown get a fill?
-        // Scaled by drummer variation: the_machine never fills breakdowns,
-        // the_cat/the_professor do most of the time.
-        _barBreakdownFillEnabled = false;
-        const _arrForFillDice = FACTORY_PRESETS[currentPresetName]?._arrangement;
-        if (_arrForFillDice && _arrForFillDice.sections && _drummerAtBar) {
-          const _curSecFD = _arrForFillDice.sections[currentSectionIdx];
-          if (_curSecFD && _curSecFD.drumStyle === 'drop') {
-            const _secMaxFD = _curSecFD.maxBars ?? _arrForFillDice.maxBars ?? 16;
-            if (sectionBarCount >= _secMaxFD) {
-              // We're on the fill bar of a drop section. Roll dice scaled by variation.
-              // the_machine (variation 0) → 0% chance
-              // the_rocker (0.25) → 25%
-              // the_ghost  (0.30) → 30%
-              // the_professor (0.50) → 50%
-              // the_cat (0.60) → 60%
-              _barBreakdownFillEnabled = Math.random() < _drummerAtBar.variation;
-            }
-          }
-        }
+        // (no breakdown sections in freeflow mode)
       }
 
       const tier = percLockedTier;
@@ -5355,32 +5219,14 @@
       let hatLevel = patterns.hat[tier][percStep];
       let rimLevel = patterns.rim[tier][percStep];
 
-      // Fill bar detection — used below after drumStyle transforms so fills
-      // actually override thin/halftime styles. Stored in a var so the apply
-      // block (later) can reference it.
-      const _arrFill = FACTORY_PRESETS[currentPresetName]?._arrangement;
-      let _isFillBar = false;
-      let _fillMaxBars = 16;
-      let _fillSectionDrumStyle = 'full';
-      if (_arrFill && _arrFill.sections && _arrFill.sections.length > 0) {
-        const _curSec = _arrFill.sections[currentSectionIdx];
-        _fillMaxBars = (_curSec && _curSec.maxBars) ?? _arrFill.maxBars ?? 16;
-        _fillSectionDrumStyle = (_curSec && _curSec.drumStyle) || 'full';
-        _isFillBar = sectionBarCount >= _fillMaxBars;
-      }
+      // Fill bar detection — periodic fills every 16 bars (freeflow mode)
+      const FILL_PERIOD = 16;
+      let _isFillBar = barCount > 0 && barCount % FILL_PERIOD === 0;
 
-      // Mid-section 4-bar accents — a softer crash every 4 bars INSIDE a section gives
-      // the listener an implicit phrase boundary without a full transition. Only on the
-      // downbeat of bar 5, 9, 13 (avoids clashing with the fill bar at the section end).
-      if (percStep === 0 && sectionBarCount > 0 && sectionBarCount % 4 === 0) {
-        const _arrMid = FACTORY_PRESETS[currentPresetName]?._arrangement;
-        const _curSecMid = _arrMid && _arrMid.sections && _arrMid.sections[currentSectionIdx];
-        const _secMaxBars = (_curSecMid && _curSecMid.maxBars) ?? _arrMid?.maxBars ?? 16;
-        // Don't fire if this IS the section end (the fill crash will cover it)
-        // and only for sections longer than 4 bars to avoid crashing the breakdown
-        if (sectionBarCount < _secMaxBars && _secMaxBars >= 8) {
-          fireSectionCrash(0.35); // softer than entry/fill crashes
-        }
+      // 4-bar phrase accents — softer crash every 4 bars for implicit phrase boundary.
+      // Skip on fill bars (fill crash covers it).
+      if (percStep === 0 && barCount > 0 && barCount % 4 === 0 && !_isFillBar) {
+        fireSectionCrash(0.35);
       }
 
       // Backbeat anchor — a drummer adds snare on 4 or 12 if the bar has no snare.
@@ -5395,44 +5241,10 @@
         }
       }
 
-      // Per-section drum style — specified in arrangement section config
-      // Styles: 'full' (default), 'thin', 'drop', 'halftime', 'skip-1'
-      let drumStyle = 'full';
-      if (_arrFill && _arrFill.sections && _arrFill.sections[currentSectionIdx]) {
-        drumStyle = _arrFill.sections[currentSectionIdx].drumStyle || 'full';
-      }
-
-      // Apply drum style transforms to the base pattern
-      if (drumStyle === 'thin') {
-        // Thin out: drop snare to ghost, kick on 0/8 only, hat sparser
-        if (snareLevel > 1) snareLevel = 1;
-        if (kickLevel > 0 && percStep !== 0 && percStep !== 8) kickLevel = 0;
-        if (hatLevel > 0 && percStep % 4 !== 0) hatLevel = 0;
-      } else if (drumStyle === 'drop') {
-        // Drop out: silence everything except an occasional rim tick on 4/12
-        kickLevel = 0;
-        snareLevel = 0;
-        hatLevel = 0;
-        if (percStep !== 4 && percStep !== 12) rimLevel = 0;
-      } else if (drumStyle === 'halftime') {
-        // Half-time: snare on 8 only (instead of 4/12), kick on 0 only
-        if (snareLevel > 0 && percStep !== 8) snareLevel = 0;
-        if (snareLevel === 0 && percStep === 8) snareLevel = 3; // strong snare on 8
-        if (kickLevel > 0 && percStep !== 0) kickLevel = 0;
-      } else if (drumStyle === 'skip-1') {
-        // Jazzy lofi: skip the downbeat, emphasize 2 and 3
-        if (percStep === 0) { kickLevel = 0; }
-        if (percStep === 2 && kickLevel === 0) kickLevel = 2;
-        if (percStep === 6 && kickLevel === 0) kickLevel = 2;
-      }
-
       // === FILL BAR OVERRIDE ===
-      // Applied AFTER drumStyle transforms so fills can override 'thin' clamps.
-      // For 'drop' sections (breakdowns), fills only fire when the per-bar dice
-      // roll enabled them (scaled by drummer variation — tight drummers skip,
-      // loose drummers add a fill before coming back in).
-      const _fillAllowed = _fillSectionDrumStyle !== 'drop' || _barBreakdownFillEnabled;
-      if (_isFillBar && _fillAllowed && percChar !== 'whisper' && percStep >= 8) {
+      // Fills fire every FILL_PERIOD bars. Applied after pattern read so fills
+      // override the base pattern. No breakdown gating in freeflow mode.
+      if (_isFillBar && percChar !== 'whisper' && percStep >= 8) {
         const fillHits = {
           8:  { snare: 2 },
           9:  { snare: 1 }, // ghost
@@ -5453,9 +5265,8 @@
           // Re-enable kicks on beats 1 and 3 for the fill backbone
           if (percStep === 8) kickLevel = 3;
         }
-        // Crash on the final step — lowered threshold to include 4-bar sections
-        // (intro, etc.) so the fill actually resolves with a cymbal hit.
-        if (percStep === 15 && _fillMaxBars >= 4) {
+        // Crash on the final step of the fill bar — resolves the build with a cymbal.
+        if (percStep === 15) {
           fireSectionCrash(0.55);
         }
       }
@@ -5466,7 +5277,7 @@
       // When GrooVAE is NOT ready, fall back to the manual stumble/ghost/decoration.
       if (!grooveReady) {
         // === Manual per-bar drum variations (fallback) ===
-        if (drumStyle === 'full' && percChar !== 'whisper') {
+        if (percChar !== 'whisper') {
           if (percStep === _barStumbleKickStep && kickLevel === 0) kickLevel = 1;
           if (percStep === _barDoubleKickStep && kickLevel === 0) kickLevel = 1;
           if (percStep === _barGhostSnareStep && snareLevel === 0 && hatLevel === 0) snareLevel = 1;
@@ -5474,23 +5285,21 @@
         }
         // Activity-driven decoration
         const decorChance = Math.min(0.25, currentActivity / 160) * _humanizePerc;
-        if (decorChance > 0.02 && percChar !== 'whisper' && (drumStyle === 'full' || drumStyle === 'skip-1')) {
+        if (decorChance > 0.02 && percChar !== 'whisper') {
           if (snareLevel === 0 && hatLevel === 0 && percStep % 2 === 1 && Math.random() < decorChance) snareLevel = 1;
           if (hatLevel === 0 && snareLevel === 0 && kickLevel === 0 && Math.random() < decorChance * 0.7) hatLevel = 1;
         }
         // Micro-variations every 4 bars
-        const barInSection = sectionBarCount;
-        if (drumStyle === 'full' && percChar !== 'whisper' && _humanizePerc > 0) {
-          if (barInSection % 4 === 3 && percStep === 8 && hatLevel > 0 && Math.random() < _humanizePerc) hatLevel = Math.max(hatLevel, 2);
-          if (barInSection % 4 === 3 && percStep === 14 && snareLevel === 0 && Math.random() < _humanizePerc) snareLevel = 1;
+        if (percChar !== 'whisper' && _humanizePerc > 0) {
+          if (barCount % 4 === 3 && percStep === 8 && hatLevel > 0 && Math.random() < _humanizePerc) hatLevel = Math.max(hatLevel, 2);
+          if (barCount % 4 === 3 && percStep === 14 && snareLevel === 0 && Math.random() < _humanizePerc) snareLevel = 1;
         }
       }
       // (When grooveReady === true, GrooVAE timing/velocity offsets are applied
       // later at trigger time via _grooveOffsets — no manual decoration needed.)
 
-      // Per-section percBoost — chorus can hit harder than verse
-      const _secForBoost = _arrFill && _arrFill.sections && _arrFill.sections[currentSectionIdx];
-      const pBoost = (_secForBoost && _secForBoost.percBoost) || 1;
+      // Activity-driven perc boost (replaces per-section percBoost)
+      const pBoost = 1;
       // Backbeat strength — snare gets a drummer-specific velocity multiplier on 4/12
       const _isBackbeat = (percStep === 4 || percStep === 12);
       const _snareBoost = _isBackbeat ? _backbeatStrength : 1.0;
@@ -5575,14 +5384,11 @@
       // within a section (think Sweet Dreams, Billie Jean — commit to the riff).
       // Section changes trigger variations (chorus inverts, breakdown fragments, etc).
       if (bassSynth) {
-        const _arrBass = FACTORY_PRESETS[currentPresetName]?._arrangement;
-        const _curSecBass = _arrBass && _arrBass.sections && _arrBass.sections[currentSectionIdx];
-
         // === TRIO BASS OVERRIDE ===
         // If Trio VAE generated a coherent bass phrase, play it instead of the
         // riff system. Trio bass is harmonically coherent with the trio melody.
         if (_mlBassPhrase && _mlBassPhrase.length > 0 && percStep === 0) {
-          const bassIdx = sectionBarCount % _mlBassPhrase.length;
+          const bassIdx = barCount % _mlBassPhrase.length;
           const bn = _mlBassPhrase[bassIdx];
           if (bn && bn.note) {
             const bNote = clampNote(bn.note);
@@ -5592,18 +5398,17 @@
         }
 
         // Rest-bar — every 4th bar has a chance to drop bass entirely.
-        const _barMod = sectionBarCount % 4;
-        const _inRestBar = (_barMod === 3) && (sectionBarCount > 0);
-        const _secDrumStyleForRest = (_curSecBass && _curSecBass.drumStyle) || 'full';
-        const skipBass = _inRestBar && _secDrumStyleForRest === 'full' && Math.random() < 0.18;
+        const _barMod = barCount % 4;
+        const _inRestBar = (_barMod === 3) && (barCount > 0);
+        const skipBass = _inRestBar && Math.random() < 0.18;
 
-        // Apply section motifStyle + per-bar pitch rotation (riff system fallback).
-        // varyRiff rotates the pitch sequence by sectionBarCount so each bar hits
+        // Apply motif style + per-bar pitch rotation (riff system fallback).
+        // varyRiff rotates the pitch sequence by barCount so each bar hits
         // a different starting pitch — this is the main source of melodic variety.
         let activeRiff = null;
         if (currentBassRiff && !skipBass) {
-          const variationName = (_curSecBass && _curSecBass.motifStyle) || 'straight';
-          activeRiff = varyRiff(currentBassRiff, variationName, sectionBarCount);
+          const variationName = getCurrentVariation();
+          activeRiff = varyRiff(currentBassRiff, variationName, barCount);
         }
 
         // The bassMap IS the riff — same lookup structure as before.
@@ -5687,8 +5492,7 @@
           else                       bDur = Math.random() < 0.4 ? '8n' : '4n';
 
           // Bass does NOT get percBoost — that's reserved for drums. The bass should
-          // stay at a consistent level through sections so the DRUMS carry the dynamics.
-          // Breakdown still drops bass via drumStyle='drop' + voice levels in gen-bass.
+          // stay at a consistent level so the DRUMS carry the dynamics.
           const finalVel = Math.min(1, bVel);
 
           bassSynth.triggerAttackRelease(bassNote, bDur, undefined, finalVel);
@@ -5751,7 +5555,7 @@
       updateXYPad();                // morph synth params from XY position
       applyMacros();                // macro gestures overwrite params with absolute ranges
       updateArrangement();          // activity-driven layer fades
-      updateArrangementSection();   // bar-based section rotation (uses percBarStart)
+      updateContinuousArrangement(); // bar-based continuous arrangement (uses percBarStart)
       smoothVoiceLevels();          // smooth voice levels toward section targets
       applySynthParams();           // push everything to Tone.js nodes
       filterPulseTick();
@@ -5867,7 +5671,6 @@
         if (musicLoop) clearInterval(musicLoop);
         stopVisualization();
         stopDrone();
-        if (_riserActive) stopRiser();
         // Stop vinyl crackle with the music
         if (vinylNoise && vinylNoise.state === 'started') {
           try { vinylNoise.stop(); } catch (_) {}
@@ -6729,30 +6532,12 @@
         _drumKit: 'tight_modern', _drummer: 'the_rocker',
         _drumHumanize: 0.4,
         _track: { minDuration: 600, maxDuration: 1200, rootPool: ['G', 'D', 'A', 'C'], leadWavePool: ['sawtooth', 'triangle', 'fatsawtooth', 'sine'] },  // default, 10-20 min, fifths + subdominant
-        _arrangement: {
-          minBars: 12, maxBars: 20,
-          sections: [
-            { name: 'flow', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0.7, 'gen-bass': 0.8, 'gen-arp': 0.3, 'gen-mel': 0.3, drone: 0.5 },
-              spotlight: ['melody', 'gen-bass', 'melody', 'gen-arp'],
-              next: { build: 0.4, drift: 0.3, rest: 0.2, flow: 0.1 } },
-            { name: 'build', minBars: 8, maxBars: 16, motifStyle: 'ornamented', drumStyle: 'full',
-              voices: { melody: 1.0, 'gen-bass': 0.9, 'gen-arp': 0.5, 'gen-mel': 0.4, drone: 0.6 },
-              spotlight: ['melody', 'gen-mel', 'gen-arp', 'melody'],
-              next: { rest: 0.4, drift: 0.3, flow: 0.2, build: 0.1 } },
-            { name: 'rest', minBars: 4, maxBars: 8, motifStyle: 'fragment', drumStyle: 'thin',
-              voices: { melody: 0.3, 'gen-bass': 0.7, 'gen-arp': 0, 'gen-mel': 0.2, drone: 0.4 },
-              next: { flow: 0.4, drift: 0.3, build: 0.3 } },
-            { name: 'drift', minBars: 8, maxBars: 12, motifStyle: 'transposed', drumStyle: 'full',
-              voices: { melody: 0.4, 'gen-bass': 0.8, 'gen-arp': 0.6, 'gen-mel': 0.5, drone: 0.5 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-bass', 'gen-arp'],
-              next: { build: 0.4, flow: 0.3, rest: 0.2, drift: 0.1 } },
-            { name: 'return', minBars: 8, maxBars: 12, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.3, drone: 0.5 },
-              entryAccent: 'crash',
-              next: { flow: 0.3, build: 0.3, drift: 0.2, rest: 0.2 } },
-          ],
+        _voiceRange: {
+          melody: [0.3, 1.0], 'gen-bass': [0.7, 0.9], 'gen-arp': [0, 0.6],
+          'gen-mel': [0.2, 0.5], drone: [0.4, 0.6],
         },
+        _spotlight: ['melody', 'gen-bass', 'melody', 'gen-arp'],
+        _motifStyles: ['straight', 'ornamented', 'fragment', 'transposed'],
         _instruments: {
           lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.01, decay: 0.4, sustain: 0.6, release: 0.6 }, cutoff: 3500, res: 1.2, level: 0.6 },
           lead_active: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.005, decay: 0.3, sustain: 0.65, release: 0.4 }, cutoff: 5500, res: 2.0, level: 0.55 }, // brighter cutoff, snappier attack
@@ -6784,25 +6569,12 @@
         _drumHumanize: 0.3,
         _track: { minDuration: 600, maxDuration: 1500, rootPool: ['C', 'G', 'F', 'D'], leadWavePool: ['sine', 'triangle', 'fatsine'] },  // bells, 10-25 min, bright major family
         // Bells — short phrases, sparkle variations
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            { name: 'chime', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'thin',
-              voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0, drone: 0.3 },
-              next: { clouds: 0.4, shimmer: 0.3, chime: 0.15, still: 0.15 } },
-            { name: 'clouds', minBars: 8, maxBars: 16, motifStyle: 'ornamented', drumStyle: 'full',
-              voices: { melody: 0.8, 'gen-bass': 0.6, 'gen-arp': 0.5, 'gen-mel': 0.3, drone: 0.5 },
-              spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
-              next: { still: 0.3, shimmer: 0.3, chime: 0.2, clouds: 0.2 } },
-            { name: 'still', minBars: 4, maxBars: 8, motifStyle: 'fragment', drumStyle: 'drop',
-              voices: { melody: 0.3, 'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0.2, drone: 0.4 },
-              next: { chime: 0.4, shimmer: 0.3, clouds: 0.3 } },
-            { name: 'shimmer', minBars: 8, maxBars: 12, motifStyle: 'inverted', drumStyle: 'full',
-              voices: { melody: 0.5, 'gen-bass': 0.5, 'gen-arp': 0.8, 'gen-mel': 0.4, drone: 0.6 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-arp', 'melody'],
-              next: { chime: 0.35, clouds: 0.35, still: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0.3, 1.0], 'gen-bass': [0.3, 0.6], 'gen-arp': [0, 0.8],
+          'gen-mel': [0, 0.4], drone: [0.3, 0.6],
         },
+        _spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
+        _motifStyles: ['straight', 'ornamented', 'fragment', 'inverted'],
         _instruments: {
           // Lead — bright sine bell with sharp attack and long shimmering tail
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.2, sustain: 0, release: 2.5 }, cutoff: 9000, res: 4, level: 0.55 },
@@ -6836,15 +6608,11 @@
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0,
         // Pad — very long slow-evolving sections, ambient Eno-style
-        _arrangement: {
-          minBars: 20, maxBars: 40,
-          sections: [
-            { name: 'rise',    motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0,   'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0, drone: 0.8 } },
-            { name: 'hold',    motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0, 'gen-mel': 0.2, drone: 1.0 } },
-            { name: 'swell',   motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.5, 'gen-bass': 0.7, 'gen-arp': 0, 'gen-mel': 0.4, drone: 1.0 } },
-            { name: 'recede',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0.1, drone: 0.7 } },
-          ],
+        _voiceRange: {
+          melody: [0, 0.5], 'gen-bass': [0.3, 0.7], 'gen-arp': [0, 0],
+          'gen-mel': [0, 0.4], drone: [0.7, 1.0],
         },
+        _motifStyles: ['straight', 'transposed', 'ornamented', 'fragment'],
         _instruments: {
           // Lead — rare melodic moments, soft fatsine
           lead: { type: 'poly', wave: 'fatsine', spread: 15, envelope: { attack: 2.0, decay: 1.5, sustain: 0.7, release: 4.0 }, cutoff: 2200, res: 0.4, level: 0.45 },
@@ -6881,35 +6649,12 @@
         _drumHumanize: 0.2,
         _track: { minDuration: 480, maxDuration: 900, rootPool: ['A', 'E', 'D', 'G'], leadWavePool: ['sawtooth', 'square', 'triangle'] },  // pluck, 8-15 min, lively pentatonic fifths
         // Pluck — bouncy arp with tight arrangement
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            { name: 'intro', minBars: 4, maxBars: 4, motifStyle: 'fragment', drumStyle: 'thin',
-              voices: { melody: 0.3, 'gen-bass': 0.6, 'gen-arp': 0.5, 'gen-mel': 0, drone: 0.3 },
-              next: { main: 0.7, bounce: 0.3 } },
-            { name: 'main', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.8, 'gen-mel': 0.4, drone: 0.5 },
-              spotlight: ['melody', 'gen-arp', 'melody', 'gen-mel'],
-              next: { break: 0.3, bounce: 0.3, cut: 0.2, main: 0.2 } },
-            { name: 'bounce', minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full',
-              voices: { melody: 0.4, 'gen-bass': 0.8, 'gen-arp': 1.0, 'gen-mel': 0.6, drone: 0.4 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-arp', 'gen-bass'],
-              entryAccent: 'crash',
-              next: { main: 0.4, break: 0.3, cut: 0.3 } },
-            { name: 'break', minBars: 4, maxBars: 8, motifStyle: 'fragment', drumStyle: 'halftime',
-              voices: { melody: 0.4, 'gen-bass': 0.7, 'gen-arp': 0.3, 'gen-mel': 0.5, drone: 0.4 },
-              next: { cut: 0.4, main: 0.3, bounce: 0.3 } },
-            // CUT — 1-bar quick stop before the return. Bouncy pluck preset wants
-            // the shortest possible stop — just a breath, not a drop.
-            { name: 'cut', minBars: 1, maxBars: 1, motifStyle: 'fragment', drumStyle: 'drop',
-              voices: { melody: 0.1, 'gen-bass': 0.2, 'gen-arp': 0, 'gen-mel': 0, drone: 0.2 },
-              next: { return: 0.6, main: 0.4 } },
-            { name: 'return', minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full',
-              entryAccent: 'crash',
-              voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.9, 'gen-mel': 0.3, drone: 0.5 },
-              next: { main: 0.4, bounce: 0.3, break: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0.1, 1.0], 'gen-bass': [0.2, 1.0], 'gen-arp': [0, 1.0],
+          'gen-mel': [0, 0.6], drone: [0.2, 0.5],
         },
+        _spotlight: ['melody', 'gen-arp', 'melody', 'gen-mel'],
+        _motifStyles: ['fragment', 'straight', 'ornamented'],
         _instruments: {
           // Lead — sharp sawtooth, zero sustain — classic pluck
           lead: { type: 'poly', wave: 'sawtooth', envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.15 }, cutoff: 5000, res: 2.2, level: 0.6 },
@@ -6969,20 +6714,11 @@
         _macros: { tension: 'plant_smooth' },
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0,
-        _arrangement: {
-          minBars: 16, maxBars: 32,
-          sections: [
-            { name: 'breeze', motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0, 'gen-bass': 0.3, 'gen-arp': 0.4, 'gen-mel': 0.2, drone: 0.7 },
-              next: { gale: 0.5, calm: 0.3, breeze: 0.2 } },
-            { name: 'gale', motifStyle: 'ornamented', drumStyle: 'full',
-              voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0.7, 'gen-mel': 0.4, drone: 1.0 },
-              next: { calm: 0.4, breeze: 0.3, gale: 0.3 } },
-            { name: 'calm', motifStyle: 'fragment', drumStyle: 'full',
-              voices: { melody: 0.1, 'gen-bass': 0.2, 'gen-arp': 0.2, 'gen-mel': 0.15, drone: 0.4 },
-              next: { breeze: 0.5, gale: 0.3, calm: 0.2 } },
-          ],
+        _voiceRange: {
+          melody: [0, 0.3], 'gen-bass': [0.2, 0.5], 'gen-arp': [0.2, 0.7],
+          'gen-mel': [0.15, 0.4], drone: [0.4, 1.0],
         },
+        _motifStyles: ['straight', 'ornamented', 'fragment'],
         _instruments: {
           // Lead — HIGH RESONANCE sine that WHISTLES when the LFO sweeps.
           // The resonant peak creates the characteristic "howling wind" sound.
@@ -7021,14 +6757,11 @@
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0,
         // Glass — sparse drops over inharmonic shimmer
-        _arrangement: {
-          minBars: 12, maxBars: 20,
-          sections: [
-            { name: 'drops',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0.3, 'gen-mel': 0, drone: 0.5 } },
-            { name: 'clusters', motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 0.6, 'gen-arp': 0.6, 'gen-mel': 0.4, drone: 0.6 } },
-            { name: 'clear',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.2, 'gen-arp': 0,   'gen-mel': 0.2, drone: 0.4 } },
-          ],
+        _voiceRange: {
+          melody: [0.3, 1.0], 'gen-bass': [0.2, 0.6], 'gen-arp': [0, 0.6],
+          'gen-mel': [0, 0.4], drone: [0.4, 0.6],
         },
+        _motifStyles: ['fragment', 'ornamented'],
         _instruments: {
           // Lead — pure resonant sine, very high cutoff
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.001, decay: 1.5, sustain: 0, release: 3.0 }, cutoff: 14000, res: 10, level: 0.55 },
@@ -7081,21 +6814,12 @@
         _drumKit: 'brushes', _drummer: 'the_professor',
         _drumHumanize: 0,
         // Ethereal — vast slow cathedral, longer sections for patient evolution
-        _arrangement: {
-          minBars: 24, maxBars: 40,
-          sections: [
-            { name: 'wash',    motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.4, 'gen-bass': 0.5, 'gen-arp': 0.3, 'gen-mel': 0.3, drone: 1.0 },
-              next: { swell: 0.5, shimmer: 0.3, wash: 0.2 } },
-            { name: 'swell',   motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.7, 'gen-bass': 0.7, 'gen-arp': 0.5, 'gen-mel': 0.5, drone: 1.0 },
-              spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
-              next: { still: 0.4, shimmer: 0.3, wash: 0.3 } },
-            { name: 'still',   motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.3, 'gen-arp': 0,   'gen-mel': 0.1, drone: 0.7 },
-              next: { wash: 0.4, shimmer: 0.4, swell: 0.2 } },
-            { name: 'shimmer', motifStyle: 'inverted',   drumStyle: 'full', voices: { melody: 0.3, 'gen-bass': 0.4, 'gen-arp': 0.7, 'gen-mel': 0.4, drone: 0.9 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-arp', 'melody'],
-              next: { wash: 0.3, swell: 0.4, still: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0.2, 0.7], 'gen-bass': [0.3, 0.7], 'gen-arp': [0, 0.7],
+          'gen-mel': [0.1, 0.5], drone: [0.7, 1.0],
         },
+        _spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
+        _motifStyles: ['straight', 'ornamented', 'fragment', 'inverted'],
         _instruments: {
           // Lead — bright fatsine shimmer, slow attack, higher cutoff than midnight
           lead: { type: 'poly', wave: 'fatsine', spread: 25, envelope: { attack: 1.5, decay: 2.0, sustain: 0.75, release: 5.0 }, cutoff: 4500, res: 0.8, level: 0.42 },
@@ -7136,35 +6860,12 @@
         _drumHumanize: 0.9,
         _track: { minDuration: 600, maxDuration: 1200, rootPool: ['G', 'D', 'A', 'E'], leadWavePool: ['fatsawtooth', 'fattriangle', 'sawtooth', 'fatsquare'] },  // organic, 10-20 min, dorian fifths
         // Organic — bluesy rotation with drum style changes per section
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            { name: 'groove', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0.8, 'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.4 },
-              spotlight: ['melody', 'gen-bass', 'gen-mel', 'melody'],
-              next: { solo: 0.3, jam: 0.3, cut: 0.2, groove: 0.2 } },
-            { name: 'solo', minBars: 8, maxBars: 16, motifStyle: 'ornamented', drumStyle: 'thin',
-              voices: { melody: 1.0, 'gen-bass': 0.6, 'gen-arp': 0, 'gen-mel': 0.2 },
-              next: { groove: 0.3, jam: 0.3, break: 0.2, solo: 0.2 } },
-            { name: 'jam', minBars: 8, maxBars: 16, motifStyle: 'transposed', drumStyle: 'full',
-              voices: { melody: 0.5, 'gen-bass': 1.0, 'gen-arp': 0.5, 'gen-mel': 0.7 },
-              spotlight: ['gen-mel', 'gen-arp', 'gen-bass', 'gen-mel'],
-              next: { groove: 0.3, solo: 0.3, cut: 0.2, break: 0.2 } },
-            // CUT — 3-bar asymmetric bluesy stop-time before the break. Odd bar count
-            // gives an off-kilter feel that fits the dorian bluesy character.
-            { name: 'cut', minBars: 3, maxBars: 3, motifStyle: 'fragment', drumStyle: 'drop',
-              voices: { melody: 0.1, 'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0 },
-              next: { groove: 0.5, return: 0.3, jam: 0.2 } },
-            { name: 'break', minBars: 4, maxBars: 8, motifStyle: 'fragment', drumStyle: 'halftime',
-              voices: { melody: 0, 'gen-bass': 1.0, 'gen-arp': 0.2, 'gen-mel': 0.5 },
-              spotlight: ['gen-bass', 'gen-mel', 'gen-bass', 'gen-arp'],
-              next: { return: 0.5, groove: 0.3, solo: 0.2 } },
-            { name: 'return', minBars: 8, maxBars: 12, motifStyle: 'straight', drumStyle: 'full',
-              entryAccent: 'crash',
-              voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.3 },
-              next: { groove: 0.4, solo: 0.3, jam: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0, 1.0], 'gen-bass': [0.3, 1.0], 'gen-arp': [0, 0.5],
+          'gen-mel': [0, 0.7],
         },
+        _spotlight: ['melody', 'gen-bass', 'gen-mel', 'melody'],
+        _motifStyles: ['straight', 'ornamented', 'transposed', 'fragment'],
         _instruments: {
           // Lead — fat sawtooth, warm but clean (dist comes from shared macro)
           lead: { type: 'poly', wave: 'fatsawtooth', spread: 18, envelope: { attack: 0.02, decay: 0.5, sustain: 0.5, release: 0.8 }, cutoff: 2000, res: 2.0, level: 0.55 },
@@ -7205,47 +6906,12 @@
         _track: { minDuration: 600, maxDuration: 1200, rootPool: ['C', 'G', 'F', 'A'], leadWavePool: ['fatsawtooth', 'square', 'fatsquare', 'sawtooth'] },  // synthwave, 10-20 min
         // Synth Wave — section GRAPH for 10-20 min tracks. Weighted next picks create
         // non-repeating paths. Spotlight rotates instrument focus within sections.
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            // INTRO — sparse, just bass + hint of melody
-            { name: 'intro', minBars: 4, maxBars: 4, motifStyle: 'fragment', drumStyle: 'thin', percBoost: 0.8,
-              voices: { melody: 0.25, 'gen-bass': 0.8, 'gen-arp': 0, 'gen-mel': 0 },
-              next: { verse: 0.7, bridge: 0.3 } },
-            // VERSE — melody lower register, drums regular
-            { name: 'verse', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'full', percBoost: 0.9,
-              voices: { melody: 0.6, 'gen-bass': 1.0, 'gen-arp': 0, 'gen-mel': 0.2 },
-              spotlight: ['melody', 'gen-bass', 'melody', 'gen-mel'],
-              next: { cut: 0.35, chorus: 0.35, bridge: 0.2, solo: 0.1 } },
-            // CUT — 2-bar stop-and-hit drop
-            { name: 'cut', minBars: 2, maxBars: 2, motifStyle: 'fragment', drumStyle: 'drop', percBoost: 0.5,
-              voices: { melody: 0.15, 'gen-bass': 0.3, 'gen-arp': 0, 'gen-mel': 0 },
-              next: { chorus: 0.8, verse: 0.2 } },
-            // CHORUS — LIFT: +1 octave, louder drums, arps crash in
-            { name: 'chorus', minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full', percBoost: 1.2,
-              octaveShift: 1, entryAccent: 'crash',
-              voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.7, 'gen-mel': 0.5 },
-              spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
-              next: { verse: 0.3, breakdown: 0.3, bridge: 0.25, solo: 0.15 } },
-            // BRIDGE — new territory. Arp-driven, lead rests, fill carries melody.
-            { name: 'bridge', minBars: 8, maxBars: 12, motifStyle: 'transposed', drumStyle: 'full', percBoost: 1.0,
-              voices: { melody: 0.15, 'gen-bass': 0.9, 'gen-arp': 0.8, 'gen-mel': 0.7, drone: 0.4 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-arp', 'gen-bass'],
-              next: { chorus: 0.5, verse: 0.3, cut: 0.2 } },
-            // SOLO — lead takes center, everything else drops. Intimate.
-            { name: 'solo', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'thin', percBoost: 0.7,
-              voices: { melody: 1.0, 'gen-bass': 0.5, 'gen-arp': 0, 'gen-mel': 0, drone: 0.3 },
-              next: { verse: 0.3, chorus: 0.4, bridge: 0.3 } },
-            // BREAKDOWN — 4-bar silence drop
-            { name: 'breakdown', minBars: 4, maxBars: 4, motifStyle: 'fragment', drumStyle: 'drop', percBoost: 0.6,
-              voices: { melody: 0.2, 'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0 },
-              next: { intro: 0.4, verse: 0.4, chorus: 0.2 } },
-            // INTERLUDE — arp-only texture. Lead and fill both rest. Ethereal.
-            { name: 'interlude', minBars: 8, maxBars: 12, motifStyle: 'inverted', drumStyle: 'halftime', percBoost: 0.8,
-              voices: { melody: 0, 'gen-bass': 0.6, 'gen-arp': 0.9, 'gen-mel': 0, drone: 0.6 },
-              next: { verse: 0.4, chorus: 0.3, solo: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0, 1.0], 'gen-bass': [0.3, 1.0], 'gen-arp': [0, 0.9],
+          'gen-mel': [0, 0.7], drone: [0.3, 0.6],
         },
+        _spotlight: ['melody', 'gen-bass', 'melody', 'gen-mel'],
+        _motifStyles: ['fragment', 'straight', 'ornamented', 'transposed', 'inverted'],
         _instruments: {
           // SYNTHWAVE IDENTITY: everything is detuned sawtooth with chorus in the shared chain.
           // Warm mid cutoffs, moderate resonance, subtle distortion — classic analog 80s.
@@ -7286,14 +6952,11 @@
         _drumKit: 'brushes', _drummer: 'the_ghost',
         _drumHumanize: 0,
         // Crystal cave — sparse drops into huge reverb/delay, 2-3 minute sections
-        _arrangement: {
-          minBars: 16, maxBars: 28,
-          sections: [
-            { name: 'drops',    motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.4, 'gen-arp': 0.2, 'gen-mel': 0, drone: 0.5 } },
-            { name: 'echoes',   motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.6, 'gen-bass': 0.5, 'gen-arp': 0.4, 'gen-mel': 0.3, drone: 0.6 } },
-            { name: 'silence',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.2, 'gen-arp': 0,   'gen-mel': 0.1, drone: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0.2, 1.0], 'gen-bass': [0.2, 0.5], 'gen-arp': [0, 0.4],
+          'gen-mel': [0, 0.3], drone: [0.3, 0.6],
         },
+        _motifStyles: ['fragment', 'ornamented'],
         _instruments: {
           // Lead — pure sine, long tail lets reverb do the work
           lead: { type: 'poly', wave: 'sine', envelope: { attack: 0.002, decay: 2.0, sustain: 0, release: 4.5 }, cutoff: 7000, res: 2.5, level: 0.55 },
@@ -7353,14 +7016,11 @@
         _drumKit: 'brushes', _drummer: 'the_ghost',
         _drumHumanize: 0,
         // Midnight — dark and slow, very long sections
-        _arrangement: {
-          minBars: 20, maxBars: 36,
-          sections: [
-            { name: 'dusk',   motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 0.2, 'gen-bass': 0.6, 'gen-arp': 0, 'gen-mel': 0.2, drone: 0.7 } },
-            { name: 'deep',   motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 0.5, 'gen-bass': 0.8, 'gen-arp': 0, 'gen-mel': 0.3, drone: 1.0 } },
-            { name: 'still',  motifStyle: 'fragment',   drumStyle: 'full', voices: { melody: 0,   'gen-bass': 0.4, 'gen-arp': 0, 'gen-mel': 0.1, drone: 0.5 } },
-          ],
+        _voiceRange: {
+          melody: [0, 0.5], 'gen-bass': [0.4, 0.8], 'gen-arp': [0, 0],
+          'gen-mel': [0.1, 0.3], drone: [0.5, 1.0],
         },
+        _motifStyles: ['straight', 'transposed', 'fragment'],
         _instruments: {
           // Lead — dark triangle, slow attack
           lead: { type: 'poly', wave: 'triangle', envelope: { attack: 1.5, decay: 1.5, sustain: 0.6, release: 3.5 }, cutoff: 1600, res: 1.5, level: 0.45 },
@@ -7402,30 +7062,12 @@
         _drumHumanize: 0,
         _track: { minDuration: 480, maxDuration: 900, rootPool: ['C', 'G', 'D', 'F'], leadWavePool: ['square', 'triangle', 'sawtooth'] },  // circuit, 8-15 min, game music pentatonic
         // Circuit — tight chiptune structure, mechanical 8-bit
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            { name: 'intro', minBars: 4, maxBars: 4, motifStyle: 'fragment', drumStyle: 'thin',
-              voices: { melody: 0.4, 'gen-bass': 0.8, 'gen-arp': 0.5, 'gen-mel': 0 },
-              next: { verse: 0.7, glitch: 0.3 } },
-            { name: 'verse', minBars: 8, maxBars: 16, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 0.8, 'gen-bass': 1.0, 'gen-arp': 0.7, 'gen-mel': 0.3 },
-              spotlight: ['melody', 'gen-arp', 'melody', 'gen-bass'],
-              next: { chorus: 0.4, glitch: 0.25, break: 0.2, verse: 0.15 } },
-            { name: 'chorus', minBars: 8, maxBars: 12, motifStyle: 'ornamented', drumStyle: 'full',
-              entryAccent: 'crash', octaveShift: 1,
-              voices: { melody: 1.0, 'gen-bass': 1.0, 'gen-arp': 0.9, 'gen-mel': 0.5 },
-              spotlight: ['melody', 'gen-arp', 'gen-mel', 'melody'],
-              next: { verse: 0.3, break: 0.3, glitch: 0.2, chorus: 0.2 } },
-            { name: 'glitch', minBars: 4, maxBars: 8, motifStyle: 'inverted', drumStyle: 'full',
-              voices: { melody: 0.3, 'gen-bass': 0.7, 'gen-arp': 1.0, 'gen-mel': 0.8 },
-              spotlight: ['gen-arp', 'gen-mel', 'gen-arp', 'gen-mel'],
-              next: { verse: 0.3, chorus: 0.4, break: 0.3 } },
-            { name: 'break', minBars: 4, maxBars: 4, motifStyle: 'fragment', drumStyle: 'drop',
-              voices: { melody: 0.3, 'gen-bass': 0.5, 'gen-arp': 0.2, 'gen-mel': 0 },
-              next: { intro: 0.3, verse: 0.4, chorus: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0.3, 1.0], 'gen-bass': [0.5, 1.0], 'gen-arp': [0.2, 1.0],
+          'gen-mel': [0, 0.8],
         },
+        _spotlight: ['melody', 'gen-arp', 'melody', 'gen-bass'],
+        _motifStyles: ['fragment', 'straight', 'ornamented', 'inverted'],
         _instruments: {
           // CIRCUIT IDENTITY: NES/Game-Boy chiptune. Narrow bandwidth (low cutoffs = lo-fi, not bright).
           // All squares for pulse-channel vibe. Ultra-short envelopes — zero reverb tail from the synth.
@@ -7486,19 +7128,11 @@
         // Song structure: ambient pianist watching a plant grow
         // 8 bars min / 20 bars max per section — ~27-67 seconds at 72 BPM
         // Rolling 20-bar activity baseline; spike = current bar > 3x recent avg
-        _arrangement: {
-          minBars: 8, maxBars: 16,
-          sections: [
-            // Piano solo over strong chord anchors — motif played straight
-            { name: 'solo',    motifStyle: 'straight',   drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.9, 'gen-arp': 0,   'gen-mel': 0,   drone: 0.6 } },
-            // Fuller — ornamented with passing tones, arps sparkle in
-            { name: 'fuller',  motifStyle: 'ornamented', drumStyle: 'full', voices: { melody: 0.8, 'gen-bass': 1.0, 'gen-arp': 0.5, 'gen-mel': 0.4, drone: 0.7 } },
-            // Breakdown — fragment of the motif, drums thin out (or drop entirely)
-            { name: 'breakdown', motifStyle: 'fragment', drumStyle: 'thin', voices: { melody: 0,   'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.6, drone: 0.5 } },
-            // Return — motif restated, drums back to full
-            { name: 'return',  motifStyle: 'transposed', drumStyle: 'full', voices: { melody: 1.0, 'gen-bass': 0.8, 'gen-arp': 0.3, 'gen-mel': 0.2, drone: 0.6 } },
-          ],
+        _voiceRange: {
+          melody: [0, 1.0], 'gen-bass': [0.8, 1.0], 'gen-arp': [0, 0.5],
+          'gen-mel': [0, 0.6], drone: [0.5, 0.7],
         },
+        _motifStyles: ['straight', 'ornamented', 'fragment', 'transposed'],
         _instruments: {
           // PIANO IDENTITY: FM synthesis — classic DX7 electric piano. The modulation
           // envelope decays fast so each note gets a bright hammer attack that fades to
@@ -7574,34 +7208,12 @@
         _track: { minDuration: 720, maxDuration: 1800, rootPool: ['E', 'A', 'C', 'G'], leadWavePool: ['triangle', 'fatsine', 'sine', 'fattriangle'] },  // lofi, 12-30 min, chill minor/major mix
         _vinyl: 0.65,
         // Lo-Fi — long chill sections, jazzy skip-beat feel in some sections
-        _arrangement: {
-          minBars: 16, maxBars: 32,
-          sections: [
-            // Main chill — full groove, melody + steady beat
-            { name: 'chill', minBars: 12, maxBars: 24, motifStyle: 'straight', drumStyle: 'full',
-              voices: { melody: 1.0, 'gen-bass': 0.8, 'gen-arp': 0, 'gen-mel': 0.2 },
-              spotlight: ['melody', 'gen-bass', 'melody', 'gen-mel'],
-              next: { fills: 0.3, tape: 0.25, space: 0.2, chill: 0.25 } },
-            // Fills — more texture, skip-1 jazzy feel
-            { name: 'fills', minBars: 8, maxBars: 16, motifStyle: 'ornamented', drumStyle: 'skip-1',
-              voices: { melody: 0.6, 'gen-bass': 0.9, 'gen-arp': 0.3, 'gen-mel': 0.5 },
-              spotlight: ['gen-mel', 'gen-bass', 'gen-arp', 'melody'],
-              next: { chill: 0.3, space: 0.3, tape: 0.2, fills: 0.2 } },
-            // Space — melody out, drums drop to half-time
-            { name: 'space', minBars: 8, maxBars: 16, motifStyle: 'fragment', drumStyle: 'halftime',
-              voices: { melody: 0, 'gen-bass': 0.7, 'gen-arp': 0, 'gen-mel': 0.3 },
-              next: { return: 0.4, chill: 0.3, tape: 0.3 } },
-            { name: 'tape', minBars: 8, maxBars: 16, motifStyle: 'inverted', drumStyle: 'full',
-              voices: { melody: 0.5, 'gen-bass': 0.8, 'gen-arp': 0.4, 'gen-mel': 0.6, drone: 0.4 },
-              spotlight: ['gen-arp', 'gen-mel', 'melody', 'gen-bass'],
-              next: { chill: 0.3, fills: 0.3, space: 0.2, tape: 0.2 } },
-            // Return to chill, melody back
-            { name: 'return', minBars: 8, maxBars: 16, motifStyle: 'transposed', drumStyle: 'full',
-              entryAccent: 'crash',
-              voices: { melody: 0.9, 'gen-bass': 0.8, 'gen-arp': 0.2, 'gen-mel': 0.2 },
-              next: { chill: 0.4, fills: 0.3, tape: 0.3 } },
-          ],
+        _voiceRange: {
+          melody: [0, 1.0], 'gen-bass': [0.7, 0.9], 'gen-arp': [0, 0.4],
+          'gen-mel': [0.2, 0.6], drone: [0, 0.4],
         },
+        _spotlight: ['melody', 'gen-bass', 'melody', 'gen-mel'],
+        _motifStyles: ['straight', 'ornamented', 'fragment', 'inverted', 'transposed'],
         // Per-instrument signal chains — each role has its own synth + filter + distortion + gain.
         // This is the pilot preset for the Option B refactor; other presets still use the legacy osc1/osc2 path.
         _instruments: {
@@ -7691,10 +7303,12 @@
       percStep = 0;                    // reset percussion position
       percPatternMutationSeed = 0;     // reset — section code will set it on next bar
       _percPatternCache = {};
-      // Reset section tracking (resetArrangementSection is called later with preset data)
+      // Reset arrangement tracking (resetArrangementSection is called later with preset data)
       barActivityWindow = [];
-      currentSectionIdx = 0;
-      sectionBarCount = 0;
+      barCount = 0;
+      motifStyleIdx = 0;
+      motifStyleBarCount = 0;
+      phraseCount = 0;
 
       // Reset to defaults first
       Object.keys(SYNTH_PARAMS).forEach(k => {
@@ -7818,8 +7432,8 @@
       // Reset section-based arrangement state (voice levels follow preset's first section if defined)
       resetArrangementSection();
 
-      // Generate a motif for presets with _arrangement — phrases will reference variations of this
-      if (preset._arrangement) {
+      // Generate a motif for presets with _voiceRange — phrases will reference variations of this
+      if (preset._voiceRange) {
         currentMotif = generateMotif();
         console.log(
           `%c[motif] %cgenerated for ${name} ` +
@@ -7828,6 +7442,14 @@
         );
         // Also generate the BASS RIFF from the motif — this is the preset's hook.
         currentBassRiff = generateBassRiff();
+        // Seed initial drum pattern from motif rhythm (melody-aware drums)
+        if (drumsRNNReady && percEnabled) {
+          const drumSeed = motifToDrumSeed(currentMotif);
+          generateMLDrumPattern(drumSeed).then(p => {
+            if (p) { _mlDrumPattern = p; _percPatternCache = {}; }
+          });
+          if (grooveReady) humanizeDrumPattern().then(o => { if (o) _grooveOffsets = o; });
+        }
       } else {
         currentMotif = null;
         currentBassRiff = null;
@@ -7969,7 +7591,7 @@
         // or the track lifecycle fires immediately on first play (trackStartTime
         // was 0 → elapsed = ~1.7 billion seconds → track "ends" on bar 1).
         const restoredPreset = FACTORY_PRESETS[currentPresetName];
-        if (restoredPreset && restoredPreset._arrangement) {
+        if (restoredPreset && restoredPreset._voiceRange) {
           currentMotif = generateMotif();
           currentBassRiff = generateBassRiff();
         } else {
