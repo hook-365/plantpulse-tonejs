@@ -9,6 +9,9 @@
   <script src="https://cdn.jsdelivr.net/npm/luxon@3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"></script>
   <script src="https://cdn.jsdelivr.net/npm/tone@14"></script>
+  <!-- Magenta.js — ML melody generation (Apache 2.0). Falls back to algorithmic if unavailable. -->
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/core.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/es6/music_rnn.js"></script>
   <!-- MQTT is proxied through the backend via SSE — no client-side MQTT needed -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -3257,6 +3260,121 @@
     let melodyDensityVal = 4;   // 1-10, controls phrase length
     let melodyCooldownSec = 4;  // seconds between phrases
     let melodyPhrase = [];      // queued notes [{note, vel, gate}]
+
+    // --- Magenta.js MelodyRNN Integration ---
+    // Pre-trained ML model generates musically coherent phrases from plant-seeded
+    // motif. Falls back to algorithmic generatePhrase if model fails to load.
+    let magentaRNN = null;
+    let magentaReady = false;
+    let _magentaPhraseBuffer = null; // pre-generated phrase waiting to be used
+
+    async function initMagenta() {
+      try {
+        if (typeof music_rnn === 'undefined') {
+          console.warn('[Magenta] library not loaded — using algorithmic fallback');
+          return;
+        }
+        magentaRNN = new music_rnn.MusicRNN(
+          'https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/melody_rnn'
+        );
+        await magentaRNN.initialize();
+        magentaReady = true;
+        console.log('%c[Magenta] %cMelodyRNN loaded — ML melodies active',
+          'color:#fbbf24;font-weight:bold', 'color:#34d399');
+      } catch (e) {
+        console.warn('[Magenta] Failed to load, using algorithmic fallback:', e.message || e);
+        magentaReady = false;
+      }
+    }
+    // Start loading immediately — async, non-blocking
+    initMagenta();
+
+    // Convert PlantPulse motif → Magenta NoteSequence for seeding the RNN
+    function motifToNoteSequence(motif, rootMidi) {
+      const SQ = 4; // steps per quarter note
+      const notes = [];
+      let step = 0;
+      for (let i = 0; i < motif.intervals.length; i++) {
+        let pitch = rootMidi + motif.intervals[i];
+        while (pitch > 79) pitch -= 12;
+        while (pitch < 48) pitch += 12;
+        const dur = motif.rhythm[i] || 1;
+        notes.push({
+          pitch,
+          quantizedStartStep: step,
+          quantizedEndStep: step + dur,
+        });
+        step += dur;
+      }
+      return {
+        quantizationInfo: { stepsPerQuarter: SQ },
+        notes,
+        totalQuantizedSteps: step,
+      };
+    }
+
+    // Snap a MIDI pitch to the nearest note in the current scale pool
+    function snapToScale(midiPitch) {
+      let bestNote = currentNotes[0] || 'C4';
+      let bestDist = Infinity;
+      for (const noteStr of currentNotes) {
+        try {
+          const m = Tone.Frequency(noteStr).toMidi();
+          const dist = Math.abs(m - midiPitch);
+          if (dist < bestDist) { bestDist = dist; bestNote = noteStr; }
+        } catch (_) {}
+      }
+      return bestNote;
+    }
+
+    // Generate a phrase via MelodyRNN — async, returns [{note, vel, gate}] or null
+    async function generateMagentaPhrase() {
+      if (!magentaReady || !currentMotif || !magentaRNN) return null;
+      try {
+        // Get the current section's motif variation (straight/inverted/etc)
+        const curSec = getCurrentSection();
+        const variationName = (curSec && curSec.motifStyle) || 'straight';
+        const variationFn = MOTIF_VARIATIONS[variationName] || MOTIF_VARIATIONS.straight;
+        const variedMotif = variationFn(currentMotif);
+
+        // Convert to NoteSequence seed
+        const rootNote = document.getElementById('rootSelect')?.value || 'C';
+        const rootMidi = { C:60, D:62, E:64, F:65, G:67, A:69, B:71 }[rootNote] || 60;
+        const seed = motifToNoteSequence(variedMotif, rootMidi);
+
+        // Temperature from plant: quiet=0.6 (conservative melodies), active=2.0 (wild)
+        const temperature = 0.6 + Math.min(currentActivity / 50, 1) * 1.4;
+
+        // Generate continuation
+        const numSteps = 16 + Math.floor(Math.random() * 16);
+        const t0 = Date.now();
+        const result = await magentaRNN.continueSequence(seed, numSteps, temperature);
+        const elapsed = Date.now() - t0;
+
+        // Convert back to PlantPulse phrase format, post-filtering to scale
+        const phrase = [];
+        for (const n of result.notes) {
+          if (n.quantizedStartStep < seed.totalQuantizedSteps) continue; // skip seed
+          const snapped = snapToScale(n.pitch);
+          const vel = Math.max(0.12, 0.25 + (n.velocity || 80) / 127 * 0.35);
+          const gate = Math.max(0.15, (n.quantizedEndStep - n.quantizedStartStep) * 0.25);
+          phrase.push({ note: snapped, vel, gate });
+        }
+
+        if (phrase.length > 0) {
+          console.log(
+            `%c[Magenta] %cgenerated ${phrase.length} notes in ${elapsed}ms ` +
+            `%ctemp=${temperature.toFixed(1)} seed=${variedMotif.intervals.join(',')}`,
+            'color:#fbbf24;font-weight:bold', 'color:#34d399', 'color:#8896b0'
+          );
+          return phrase;
+        }
+        return null;
+      } catch (e) {
+        console.warn('[Magenta] generation failed:', e.message || e);
+        return null;
+      }
+    }
     let melodyPhraseIdx = 0;
     let melodyPhraseRepeat = 0; // how many times the current phrase has played
     const MELODY_MAX_REPEATS = 3; // play the phrase 3 times before generating a new one
@@ -3699,12 +3817,27 @@
       if ((actDelta > 0.3 || (now - lastMelodyPhraseTime > cooldownMs * 2)) && now - lastMelodyPhraseTime > cooldownMs) {
         lastMelodyPhraseTime = now;
 
-        const signalNorm = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
-        const direction = currentRawValue - currentSmoothed; // positive = rising
-
-        melodyPhrase = generatePhrase(currentActivity, signalNorm, direction);
+        // Use pre-generated Magenta phrase if available (ML-generated, more musical).
+        // Otherwise fall back to algorithmic generation. Either way, kick off
+        // background generation of the NEXT phrase so it's ready when needed.
+        if (_magentaPhraseBuffer) {
+          melodyPhrase = _magentaPhraseBuffer;
+          _magentaPhraseBuffer = null;
+        } else {
+          // Algorithmic fallback — same as before Magenta integration
+          const signalNorm = Math.max(0, Math.min(1, (currentRawValue - signalMin) / (signalMax - signalMin || 1)));
+          const direction = currentRawValue - currentSmoothed;
+          melodyPhrase = generatePhrase(currentActivity, signalNorm, direction);
+        }
         melodyPhraseIdx = 0;
         melodyPhraseRepeat = 0;
+
+        // Pre-generate the NEXT phrase in the background via Magenta.
+        // By the time this phrase finishes playing (3 repeats), the next one
+        // will be ready in _magentaPhraseBuffer. Zero perceived latency.
+        generateMagentaPhrase().then(phrase => {
+          if (phrase) _magentaPhraseBuffer = phrase;
+        });
       }
     }
 
@@ -6024,6 +6157,7 @@
     const FACTORY_PRESETS = {
       default: {
         seq_mode: 'generative', seq_voice: 'poly', seq_prob: 0.4, seq_gate: 0.5,
+        filter_cutoff:1200, filter_res:3,
         _perc: false, _percFeel: 'groovy', _percChar: 'standard', _melodyEnabled: true, _melodyOctave: 1, _clockBPM: 85, _scale: 'pentatonic', _root: 'G',
         _macros: { energy: 'plant_activity' },
         _mod:{
@@ -6075,7 +6209,7 @@
       // BELLS — bright, percussive, short decay, high filter with resonance ping
       bells: {
         osc1_wave:'sine', osc2_wave:'triangle', osc1_detune:0, osc2_detune:12, osc2_octave:1,
-        filter_cutoff:8000, filter_res:6, filter_env_amt:4, filter_env_a:0.001, filter_env_d:0.5, filter_env_s:0,
+        filter_cutoff:2000, filter_res:6, filter_env_amt:4, filter_env_a:0.001, filter_env_d:0.5, filter_env_s:0,
         amp_a:0.001, amp_d:0.8, amp_s:0, amp_r:1.2, amp_level:0.5,
         rev_decay:4, rev_wet:0.2, dly_time:0.3, dly_fb:0.15, dly_wet:0.1,
         seq_mode:'generative', seq_prob:0.4, seq_gate:0.3,
@@ -6131,11 +6265,12 @@
       pad: {
         osc1_wave:'fatsine', osc2_wave:'fatsawtooth', osc1_spread:40, osc2_spread:25,
         osc1_detune:0, osc2_detune:3, osc2_level:0.3, osc2_octave:-1,
-        filter_cutoff:1500, filter_res:0.3, filter_env_amt:1,
+        filter_cutoff:600, filter_res:4, filter_env_amt:1,
         amp_a:4, amp_d:3, amp_s:0.8, amp_r:6, amp_level:0.4,
         rev_decay:8, rev_wet:0.4, chr_wet:0.3, chr_rate:0.12,
         seq_mode:'drone', seq_prob:0.2,
         _mod:{
+          filter_cutoff:{ source:'lfo1', depth:0.6 },
           osc1_level:{ source:'plant_smooth', depth:0.3 },     // osc balance shifts
           osc2_level:{ source:'plant_raw', depth:0.3 },        // timbre morphs
         }, lfo1_rate:0.04, lfo1_wave:'triangle', _perc: false, _percFeel: 'whisper', _percChar: 'whisper', _melodyEnabled: false, _melodyOctave: 1, _clockBPM: 70, _scale: 'major', _root: 'E', _maxMidi: 64,
@@ -6171,7 +6306,7 @@
       // PLUCK — sharp attack, zero sustain, fast arp, dry with light delay
       pluck: {
         osc1_wave:'sawtooth', osc2_wave:'triangle', osc2_octave:1,
-        filter_cutoff:5000, filter_res:2, filter_env_amt:5, filter_env_a:0.001, filter_env_d:0.15, filter_env_s:0,
+        filter_cutoff:1500, filter_res:4, filter_env_amt:5, filter_env_a:0.001, filter_env_d:0.15, filter_env_s:0,
         amp_a:0.001, amp_d:0.2, amp_s:0, amp_r:0.15, amp_level:0.5,
         rev_decay:1, rev_wet:0.1, dly_time:0.19, dly_fb:0.35, dly_wet:0.3,
         seq_mode:'arp', seq_voice:'arp', seq_prob:0.6, seq_gate:0.15,
@@ -6312,7 +6447,7 @@
       // GLASS — inharmonic, high resonance, percussive, lots of space
       glass: {
         osc1_wave:'sine', osc2_wave:'sine', osc2_detune:70, osc2_octave:1,
-        filter_cutoff:12000, filter_res:12, filter_env_amt:6, filter_env_a:0.001, filter_env_d:1.5, filter_env_s:0,
+        filter_cutoff:2000, filter_res:12, filter_env_amt:6, filter_env_a:0.001, filter_env_d:1.5, filter_env_s:0,
         amp_a:0.001, amp_d:1.5, amp_s:0, amp_r:3, amp_level:0.5,
         rev_decay:12, rev_wet:0.65, dly_time:0.5, dly_fb:0.4, dly_wet:0.3,
         seq_mode:'spike', seq_prob:0.3, seq_gate:0.8,
@@ -6362,7 +6497,7 @@
         // OSC2: shimmer layer ONE octave UP, louder than before — audible sparkle
         osc2_wave:'fatsine', osc2_octave:1, osc2_detune:7, osc2_level:0.3, osc2_spread:20,
         // Filter: BRIGHTER than midnight — lets overtones shimmer through
-        filter_cutoff:3200, filter_res:0.8, filter_env_amt:0,
+        filter_cutoff:800, filter_res:4, filter_env_amt:0,
         // Amp: slow swell, very long sustain and release — notes BLOOM
         amp_a:4, amp_d:5, amp_s:0.8, amp_r:10, amp_level:0.4,
         // Massive cathedral space
@@ -6492,7 +6627,7 @@
       synthwave: {
         osc1_wave:'fatsawtooth', osc2_wave:'square', osc1_spread:15, osc2_detune:5,
         osc1_level:0.7, osc2_level:0.5,
-        filter_cutoff:3500, filter_res:2, filter_env_amt:3,
+        filter_cutoff:1500, filter_res:4, filter_env_amt:3,
         filter_env_a:0.001, filter_env_d:0.25, filter_env_s:0.4,
         amp_a:0.005, amp_d:0.2, amp_s:0.7, amp_r:0.3, amp_level:0.5,
         chr_wet:0.35, chr_rate:1, dly_time:0.2, dly_fb:0.2, dly_wet:0.15,
@@ -6576,7 +6711,7 @@
       // CRYSTAL CAVE — sparse, huge reverb + delay, dripping echoes
       crystalcave: {
         osc1_wave:'sine', osc2_wave:'triangle', osc2_detune:40, osc2_octave:1, osc2_level:0.3,
-        filter_cutoff:6000, filter_res:3, filter_env_amt:4,
+        filter_cutoff:800, filter_res:6, filter_env_amt:4,
         filter_env_a:0.001, filter_env_d:1, filter_env_s:0,
         amp_a:0.001, amp_d:2, amp_s:0, amp_r:5, amp_level:0.5,
         rev_decay:18, rev_wet:0.85, dly_time:1.2, dly_fb:0.65, dly_wet:0.55,
@@ -6624,7 +6759,7 @@
         // OSC2: sub-octave fatsine TWO octaves down — deep sub foundation
         osc2_wave:'fatsine', osc2_octave:-2, osc2_level:0.5, osc2_spread:12, osc2_detune:3,
         // Filter: 1200Hz lets harmonics through, slight resonance for character
-        filter_cutoff:1200, filter_res:1.5, filter_env_amt:1.5,
+        filter_cutoff:500, filter_res:6, filter_env_amt:1.5,
         filter_env_a:0.01, filter_env_d:1.0, filter_env_s:0.4, filter_env_r:3,
         // Amp: slow swell, decent sustain so you can actually hear the drone
         amp_a:2, amp_d:3, amp_s:0.5, amp_r:5,
@@ -6688,7 +6823,7 @@
       circuit: {
         osc1_wave:'square', osc2_wave:'triangle', osc2_detune:0, osc2_octave:-1,
         osc1_spread:0, osc2_spread:0, osc1_level:0.7, osc2_level:0.35,
-        filter_cutoff:8000, filter_res:1, filter_env_amt:2,
+        filter_cutoff:2000, filter_res:3, filter_env_amt:2,
         filter_env_a:0.001, filter_env_d:0.1, filter_env_s:0.3,
         amp_a:0.001, amp_d:0.1, amp_s:0.6, amp_r:0.08, amp_level:0.5,
         dist_amt:0.08, dist_wet:0.2, dly_time:0.18, dly_fb:0.2, dly_wet:0.1,
@@ -6762,7 +6897,7 @@
         osc2_wave:'sine', osc2_octave:0, osc2_detune:1, osc2_level:0.15, osc2_spread:0,
         // Filter: the key to piano sound — sharp bright burst (hammer) decaying to warm tone
         // High env amount (6 octaves), very fast decay (150ms), low sustain
-        filter_cutoff:1200, filter_res:0.3, filter_env_amt:6,
+        filter_cutoff:1200, filter_res:2, filter_env_amt:6,
         filter_env_a:0.001, filter_env_d:0.15, filter_env_s:0.05, filter_env_r:2,
         // Amp: instant attack, long natural decay (3.5s), near-zero sustain — notes ring then die
         amp_a:0.001, amp_d:3.5, amp_s:0.02, amp_r:2, amp_level:0.55,
@@ -6846,7 +6981,7 @@
         // OSC2: sine sub layer one octave down for weight
         osc2_wave:'sine', osc2_octave:-1, osc2_level:0.25, osc2_spread:0, osc2_detune:0,
         // Filter: warm and rolled off, gentle envelope for key pluck
-        filter_cutoff:1800, filter_res:1.2, filter_env_amt:2,
+        filter_cutoff:800, filter_res:3, filter_env_amt:2,
         filter_env_a:0.005, filter_env_d:0.5, filter_env_s:0.3, filter_env_r:1,
         // Amp: medium attack (not too sharp), good sustain for chords
         amp_a:0.02, amp_d:1.2, amp_s:0.5, amp_r:2, amp_level:0.5,
