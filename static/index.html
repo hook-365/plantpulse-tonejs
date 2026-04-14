@@ -3773,13 +3773,15 @@
         }
       }
 
-      // 2. TRACK PRESETS: Trio VAE (coherent melody+bass+drums from one model)
+      // 2. TRACK PRESETS: Trio VAE for MELODY + BASS only.
+      // Trio drums are NOT used — they're generic and override genre-specific
+      // drum recipes (LinnDrum, NES, brushes, etc). The coherence benefit is
+      // melody+bass; drums should stay genre-tuned.
       if (mode !== 'drone' && trioReady) {
         const trio = await generateTrioBuffer();
         if (trio) {
-          // Feed bass + drums to their respective systems
           if (trio.bass) _mlBassPhrase = trio.bass;
-          if (trio.drums) { _mlDrumPattern = trio.drums; _percPatternCache = {}; }
+          // Deliberately NOT setting _mlDrumPattern from trio — keep our drums
           if (trio.melody) return trio.melody;
         }
       }
@@ -5796,22 +5798,31 @@
         };
 
         if (!requiredReady()) {
+          // Show a gentle centered toast — doesn't touch button layout at all
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          const toast = document.createElement('div');
+          toast.id = 'mlLoadToast';
+          toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+            'background:rgba(10,18,32,0.92);border:1px solid rgba(52,211,153,0.25);' +
+            'border-radius:8px;padding:20px 32px;font-family:inherit;font-size:13px;' +
+            'letter-spacing:1.5px;color:#34d399;z-index:999;text-align:center;' +
+            'backdrop-filter:blur(8px);animation:fade-up 0.4s ease both;';
+          document.body.appendChild(toast);
           const _loadMsgs = [
             'Photosynthesizing...', 'Growing neural roots...', 'Absorbing sunlight...',
             'Unfurling leaves...', 'Tuning chlorophyll...', 'Connecting to mycelium...',
             'Budding melodies...', 'Composting algorithms...', 'Germinating beats...',
           ];
           let _loadMsgIdx = 0;
-          btn.textContent = _loadMsgs[0];
-          btn.classList.add('loading');
-          // Poll every 300ms, timeout after 25s (fall back to algorithmic)
+          toast.textContent = _loadMsgs[0];
           await new Promise(resolve => {
             let elapsed = 0;
             const poll = setInterval(() => {
               elapsed += 300;
               if (elapsed % 2400 === 0) {
                 _loadMsgIdx = (_loadMsgIdx + 1) % _loadMsgs.length;
-                btn.textContent = _loadMsgs[_loadMsgIdx];
+                toast.textContent = _loadMsgs[_loadMsgIdx];
               }
               if (requiredReady() || elapsed > 25000) {
                 clearInterval(poll);
@@ -5819,6 +5830,11 @@
               }
             }, 300);
           });
+          toast.style.opacity = '0';
+          toast.style.transition = 'opacity 0.5s';
+          setTimeout(() => toast.remove(), 600);
+          btn.disabled = false;
+          btn.style.opacity = '';
           btn.classList.remove('loading');
           if (requiredReady()) {
             console.log('%c[Magenta] %cAll required models loaded — starting playback',
