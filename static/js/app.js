@@ -15,6 +15,7 @@ import * as arc from "./composer/arc.js";
 import * as lifecycle from "./composer/lifecycle.js";
 import * as voices from "./composer/voices.js";
 import * as improv from "./composer/improv.js";
+import * as lefthand from "./composer/lefthand.js";
 import { createAudio } from "./audio/context.js";
 import { installAudio } from "./audio/player.js";
 
@@ -40,6 +41,7 @@ export async function boot({ room = null, log = console.log } = {}) {
   lifecycle.install(C);
   voices.install(C);
   improv.install(C);
+  lefthand.install(C);
   applyMood(C, roomRec.mood);
   C.weatherLoad();
   clock.play(C.weatherPoll, { sec: true, name: "weather" });

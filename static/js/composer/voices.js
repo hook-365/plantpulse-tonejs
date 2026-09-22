@@ -176,9 +176,7 @@ export function install(C) {
       else yield* C.playPhrase();
     }
   };
-  //! the left hand is the pianist's (lefthand.js); a room whose level is 0
-  //! idles it exactly as the live engine does
-  C.leftHandBody = C.leftHandBody ?? function* () { for (;;) { yield 1.0; } };
+  //! the left hand is lefthand.js's (installed after this module)
 
   //! Phase offsets order the bar line: conductor (quant 4) advances harmony
   //! first, the pad strikes next, the left hand builds its bar last.

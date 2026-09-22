@@ -77,7 +77,7 @@ test("a chord change cross-fades: voices on a kept tone stay, new tones enter, t
   b.done();
 });
 
-test("piano room: the pad idles (padLevel 0); only the pianist's right hand sounds until the left hand and strings are seated", () => {
+test("piano room: the pad idles (padLevel 0); the pianist's two hands sound, nothing else until the strings are seated", () => {
   const b = band({ room: "piano", seed: 14, warm: 60 });
   b.C.voices.add("ppPianoSampler");
   b.start();
@@ -85,6 +85,7 @@ test("piano room: the pad idles (padLevel 0); only the pianist's right hand soun
   const names = new Set(b.audio.spawns.map((s) => s.name));
   assert.deepEqual([...names], ["ppPianoSampler"], `spawned ${[...names]}`);
   assert.ok(b.C.chordPath.length >= 1);
-  assert.ok(b.notes.every((n) => n.r === "rh" || n.r === "duo"), `roles ${[...new Set(b.notes.map((n) => n.r))]}`);
+  assert.ok(b.notes.every((n) => ["rh", "lh", "duo"].includes(n.r)), `roles ${[...new Set(b.notes.map((n) => n.r))]}`);
+  assert.ok(b.notes.some((n) => n.r === "lh"), "the left hand played");
   b.done();
 });
