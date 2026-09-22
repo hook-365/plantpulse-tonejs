@@ -14,6 +14,7 @@ import * as lifecycle from "../static/js/composer/lifecycle.js";
 import * as voices from "../static/js/composer/voices.js";
 import * as improv from "../static/js/composer/improv.js";
 import * as lefthand from "../static/js/composer/lefthand.js";
+import * as strings from "../static/js/composer/strings.js";
 import { setRng } from "../static/js/sc.js";
 import { mulberry32 } from "./rng.mjs";
 
@@ -47,6 +48,7 @@ export function band({ room = "drift", seed = 1, signalSeed = 1, warm = 0, log =
   voices.install(C);
   improv.install(C);
   lefthand.install(C);
+  strings.install(C);
   const audio = fakeAudio(C);
   applyMood(C, room);
   feed(clock, new SignalProcessor(), C.onFeature, makeSignal({ seed: signalSeed }));

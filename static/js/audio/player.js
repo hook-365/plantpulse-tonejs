@@ -7,6 +7,7 @@ import { buildChain, applyMoodFx, moodFx } from "./master.js";
 import { playBreath, playAir, playSubHeld, tuneLiveBeds } from "./breath.js";
 import { makeSampler } from "./sampler.js";
 import { playPiano, playPedalChange } from "./piano.js";
+import { playCello } from "./cello.js";
 
 export function installAudio(C, audio, { onSamples = null } = {}) {
   const { ctx, pageOut, toAudio } = audio;
@@ -54,6 +55,10 @@ export function installAudio(C, audio, { onSamples = null } = {}) {
         return playSubHeld(ctx, args.freq, t0, args.amp, dest);
       case "ppPianoSampler":
         return playPiano(ctx, sampler, { ...args, vel: C.pianoRoundRobin ? C.pianoRoundRobin(Math.round(args.midinote), args.vel ?? 8) : args.vel }, t0, dest);
+      case "ppCello":
+        return playCello(ctx, sampler, args, t0, dest, { held: false });
+      case "ppCelloLeg":
+        return playCello(ctx, sampler, args, t0, dest, { held: true });
       default:
         return null;   //! a voice this layer lacks: logged, drawn, silent
     }

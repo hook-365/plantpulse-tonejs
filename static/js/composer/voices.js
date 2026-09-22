@@ -23,6 +23,9 @@ export function install(C) {
     const rec = C.noteLogWrite(role, midinote, amp, dur, vel, xtr, voice);
     const args = { freq: midicps(midinote), midinote, amp, dur, pan, vel };
     for (let i = 0; i + 1 < xtr.length; i += 2) args[xtr[i]] = xtr[i + 1];
+    //! the upright's presence layer (mood bassPresence) rides its notes; no
+    //! free room seats the upright, the arg is the engine's contract
+    if (voice === "ppDoubleBass") args.presence = C.mood.bassPresence ?? 0;
     return C.synth?.(voice, args, rec.t) ?? null;
   };
 
