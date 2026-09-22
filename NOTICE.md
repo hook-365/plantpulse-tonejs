@@ -18,10 +18,6 @@ why this repository never contains them: `tools/fetch-samples` downloads the
 archive from the Philharmonia's own bucket and prepares the cello on your
 machine. Credit the Philharmonia Orchestra if you publish audio.
 
-## Tone.js
-Yotam Mann and contributors. MIT. Vendored in `static/vendor/`.
-https://github.com/Tonejs/Tone.js
-
 ## Chart.js
-Chart.js contributors. MIT. Vendored in `static/vendor/`.
+Chart.js contributors. MIT. Vendored as `static/vendor/chart.umd.js` (4.5.1).
 https://github.com/chartjs/Chart.js

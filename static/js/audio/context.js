@@ -1,18 +1,12 @@
-//! context.js: one AudioContext for the page. Tone.js, when present, is the
-//! host (Tone.start() is the user-gesture unlock the browser wants and the
-//! page's own oscilloscope runs on it); the instruments are Web Audio
-//! graphs on the same context, node for node with the live engine's
-//! SynthDefs. Without Tone the context is made directly.
+//! context.js: one native AudioContext for the page. The instruments are
+//! Web Audio graphs node for node with the live engine's SynthDefs, and
+//! they use the whole API (buffer-source rate modulation, value curves,
+//! stereo panners), so the context is the browser's own: a wrapper such as
+//! Tone.js's standardized context lacks parts of it (the first cello bow
+//! threw on one), and this port never needed Tone's abstractions.
 
 export async function createAudio({ volume = 1 } = {}) {
-  let ctx;
-  const T = globalThis.Tone;
-  if (T && typeof T.start === "function") {
-    await T.start();
-    ctx = T.getContext().rawContext;
-  } else {
-    ctx = new (globalThis.AudioContext || globalThis.webkitAudioContext)();
-  }
+  const ctx = new (globalThis.AudioContext || globalThis.webkitAudioContext)();
   if (ctx.state === "suspended") await ctx.resume();
   const pageOut = ctx.createGain();
   pageOut.gain.value = volume * volume;   //! the fader is squared, as on the live page

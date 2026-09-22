@@ -3,7 +3,7 @@
 //! is a ~1.5-2.3 s Philharmonia recording; the engine holds a note by
 //! looping its own sustain plateau with a wide crossfade. Here the buffer
 //! is extended offline to bow length (the plateau measured per recording,
-//! as the engine's loops.json is), then played with vibrato on detune
+//! as the engine's loops.json is), then played with vibrato on the rate
 //! (arriving after the note speaks and widening), a hairpin swell, the
 //! bow's breath (+-0.5 dB wander, a wandering damping low-pass 3.4-4.6 kHz),
 //! and the legato retune in place: a slurred pitch change is a finger
@@ -71,17 +71,20 @@ export function playCello(ctx, sampler, args, t0, dest, { held = false } = {}) {
   const seconds = held ? HELD_SECONDS : dur + rel + 0.9;
   const buf = extendBow(ctx, base, seconds);
   const src = ctx.createBufferSource(); src.buffer = buf;
-  const rateFor = (m) => Math.pow(2, (m - pick.sampleMidi) / 12);
+  //! a desk's fixed detune (cents) folds into the rate
+  const rateFor = (m) => Math.pow(2, (m - pick.sampleMidi) / 12) * Math.pow(2, (args.cents ?? 0) / 1200);
   src.playbackRate.value = rateFor(midinote);
-  src.detune.value = args.cents ?? 0;
-  //! vibrato: a sine at vibRate into detune, its depth arriving over
-  //! vibDelay then vibGrow (Env [0, 0, 1])
+  //! vibrato: a sine at vibRate added to the rate (cents scaled to a rate
+  //! delta: rate * ln2 / 1200 per cent), its depth arriving over vibDelay
+  //! then vibGrow (Env [0, 0, 1]). On the rate, not detune: every context
+  //! has playbackRate, and a buffer source's detune is missing in some.
   const vibRate = args.vibRate ?? 5.2, vibDepth = args.vibDepth ?? 0.0, vibDelay = args.vibDelay ?? 0.5, vibGrow = args.vibGrow ?? 0.6;
+  const centsToRate = (c) => rateFor(midinote) * c * Math.LN2 / 1200;
   const vib = ctx.createOscillator(); vib.type = "sine"; vib.frequency.value = vibRate;
   const vibG = ctx.createGain(); vibG.gain.setValueAtTime(0, t0);
   vibG.gain.setValueAtTime(0, t0 + vibDelay);
-  vibG.gain.linearRampToValueAtTime(vibDepth, t0 + vibDelay + Math.max(0.01, vibGrow));
-  vib.connect(vibG); vibG.connect(src.detune);
+  vibG.gain.linearRampToValueAtTime(centsToRate(vibDepth), t0 + vibDelay + Math.max(0.01, vibGrow));
+  vib.connect(vibG); vibG.connect(src.playbackRate);
   //! the bow's breath: +-0.5 dB wander, and the damping low-pass wandering 3.4-4.6 kHz
   const damp = ctx.createBiquadFilter(); damp.type = "lowpass"; damp.frequency.value = 4000; damp.Q.value = 0.5;
   const dampLfo = ctx.createOscillator(); dampLfo.type = "sine"; dampLfo.frequency.value = 0.3; dampLfo.detune.value = (Math.random() * 2 - 1) * 600;

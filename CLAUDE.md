@@ -2,7 +2,7 @@
 
 ## What This Is
 
-PlantPulse reads bioelectrical signals from living plants via an ESP32 + ADS1115 ADC and transforms them in real-time into generative music. The plant acts as a live conductor — seeding melodic motifs, controlling ensemble dynamics, triggering section changes, and crossfading between instruments. It's running live at `plantpulse.hook.technology` with a hibiscus tree performing continuously.
+PlantPulse reads bioelectrical signals from living plants via an ESP32 + ADS1115 ADC and transforms them in real-time into generative music. The plant is heard as four signals ranked against its own day (energy, stability, center, tilt, plus the day's weather) and a composer in the browser plays from them: two rooms, drift (a breathing drone) and piano (a pianist with two hands, sometimes a cellist). The live site `plantpulse.hook.technology` runs the same decisions on the project's SuperCollider engine with a third, licensed-sample room; this repo is the free browser port.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Plant leaf → alligator clips → ADS1115 (16-bit I2C ADC, ±256mV)
   → ESP32-WROOM-32D (WiFi + MQTT)
   → Mosquitto broker
   → Flask server (SSE proxy, sample packs)
-  → Browser (Tone.js / Web Audio API synth engine)
+  → Browser (the composer, plain Web Audio)
 ```
 
 **Key design principle: Dumb sensor, secure server, smart client.**
@@ -26,7 +26,8 @@ Plant leaf → alligator clips → ADS1115 (16-bit I2C ADC, ±256mV)
 ```
 plantpulse-tonejs/
 ├── server.py           # Flask: MQTT→SSE bridge, /config.json, /healthz, /api/samples/*, POST /api/take
-├── static/index.html   # THE page (served at /): the Tone.js engine, being replaced by the composer port
+├── static/index.html   # THE page (served at /), static/js/app.js mounts it; static/js/composer + audio = the engine
+├── static/vendor/      # chart.umd.js (Chart.js 4.5.1, MIT): the page makes no third-party requests
 ├── static/config.json  # Plant identity (name, type, location) — served publicly, no credentials
 ├── tools/fetch-samples # Downloads Salamander (CC BY 3.0) + the Philharmonia cello into samples/ (never committed)
 ├── tools/simulate-signal # A fake plant on MQTT at 4 Hz (docker compose --profile demo)
@@ -68,44 +69,15 @@ Flask app on port `8286`. No database: the composer keeps its own day of history
 
 **Workers:** gunicorn gevent, 2 workers (`gevent.queue.Queue` when available).
 
-## The composer port (`static/js/`)
+## The composer (`static/js/`)
 
-The 2.0 engine: a JavaScript port of the live project's SuperCollider composer, one module per `.scd` file so the spec's names carry over (`composer/energy.js`, `harmony.js`, `arc.js`, `lifecycle.js`, `voices.js`, `improv.js`; `lefthand.js` and `strings.js` land with the pianist's left hand and the cello). `signal.js` is the bridge's feature maths in the browser; `composer/clock.js` is a TempoClock (routines are generators, `yield 4` waits four beats, `yield {sec: 30}` waits on the wall; a tempo change re-anchors at the current beat; routines start on `quant [4, phase]`). `composer/state.js` is the one context every module installs onto (sclang's `~globals`). The audio layer (`audio/master.js`, `breath.js`, `player.js`) is the live engine's SynthDefs node for node in Web Audio; Tone.js is the host context. Data: `static/composer/{moods,mood-schema,rooms}.json` via `tools/sync-composer-data` from the live project (drift and piano only).
+The 2.0 engine: a JavaScript port of the live project's SuperCollider composer, one module per `.scd` file so the spec's names carry over (`composer/energy.js`, `harmony.js`, `arc.js`, `lifecycle.js`, `voices.js`, `improv.js`, `lefthand.js`, `strings.js`). `signal.js` is the bridge's feature maths in the browser; `composer/clock.js` is a TempoClock (routines are generators, `yield 4` waits four beats, `yield {sec: 30}` waits on the wall; a tempo change re-anchors at the current beat; routines start on `quant [4, phase]`; an error in one routine ends it and is reported, the tick goes on). `composer/state.js` is the one context every module installs onto (sclang's `~globals`). The audio layer (`audio/context.js`, `master.js`, `breath.js`, `sampler.js`, `piano.js`, `cello.js`, `player.js`) is the live engine's SynthDefs node for node in plain Web Audio on a native `AudioContext`. **Tone.js is not used**: the repo's name is history (the 1.0 engine was Tone.js; that engine is release v1.0.0). Data: `static/composer/{moods,mood-schema,rooms}.json` via `tools/sync-composer-data` from the live project (drift and piano only).
 
-Laws, kept by `tools/gate`: the closed mood schema (every key read by its consumer module, every read key in the schema; chairs not yet built are warned, the drummer is a typed hole); raw plant-feature names only in `energy.js` and `signal.js`; no `mood.name ===` branching; comments in `static/js/composer/` are receipts (`//!`) or absent. Tests: `node --test "tests/*.test.mjs"` on a virtual clock (`tests/harness.mjs` seats the band with a fake audio layer).
+Laws, kept by `tools/gate`: the closed mood schema (every key read by its consumer module, every read key in the schema; the drummer is a typed hole); raw plant-feature names only in `energy.js` and `signal.js`; no `mood.name ===` branching; comments in `static/js/composer/` are receipts (`//!`) or absent; no third-party requests from the page (`static/vendor/` holds Chart.js). Tests: `node --test "tests/*.test.mjs"` on a virtual clock (`tests/harness.mjs` seats the band with a fake audio layer).
 
-Until the cut-over the port runs behind `?engine=v2` (`&room=drift|piano`) with its own small deck; the old engine below stays the page's default.
+## The page (`static/index.html` + `static/js/app.js`)
 
-## Synth Engine (`index.html`)
-
-The entire music system is client-side JavaScript using Tone.js and the Web Audio API.
-
-### Signal Processing
-- Raw MQTT values → sliding window (size 5) → EMA smoothing (α=0.1)
-- Activity = `min(100, (delta / 15) * 100)` where delta = abs(current − previous)
-- BPM from zero-crossing detection, clamped 20–120, boosted by activity × bpmEnergy
-- Effective BPM cap: 160
-
-### Layers
-- **Bass** — fires every 4 beats, only when note changes, maps smoothed signal to octave
-- **Melody** — probabilistic per beat (15–55% based on activity), velocity 0.15–0.85
-- **Arp** — activity threshold 15, speed tiers (quarter/8th/16th at 15/25/50 activity)
-- **Chimes** — spike-triggered (10% of signal range), 1500ms min gap
-- **Ambient pad** — updates every 8 beats, 2–3 note chords, brown noise bed
-- **Drums** — 4-beat cycle, per-preset drumStyle (none/minimal/gentle)
-
-### Motif DNA System
-At each track start, plant state seeds a short melodic motif that becomes the shared identity for melody, bass, and phrase generation. Motif variations (transposed, inverted, fragmented, ornamented) rotate per section. After 5–12 minutes, the track ends, a new motif regenerates from current plant state, and the key modulates through a preset-defined pool.
-
-### Presets (14 total)
-Each preset defines: synth types, effect chains, drum kit, drummer personality (swing, ghost note probability, fill style), bass riff template, arrangement structure, key rotation pool, and track duration. No two presets share a musical identity.
-
-Current presets: Default, Bells, Pad, Pluck, Wind, Glass, Ethereal, Organic, Synth Wave, Crystal Cave, Midnight, Circuit, Piano, Lo-Fi.
-
-(The engine and its presets are being replaced by the composer port; this section describes the page as it still is.)
-
-### Multi-Channel Support
-Up to 3 differential channels across 2 ADS1115 chips. Patch bay in UI routes any channel to any synth parameter.
+One page: the plant's identity and the four signals as meters (energy, stability, center, tilt, weather, and how far the ranks have warmed), the room cards (drift, piano), play / volume / record (a .webm of what you hear) / save take (the note log `tools/take-review` reads), a now-playing line (bar, key, the chord path, the section, the pianist's and cellist's words), and the raw trace over 30 s to 5 m. `app.js` boots the composer on load (the signals warm before play), opens the audio on the press of play, loads the sample packs (the piano room waits for its library; drift plays with none), and seats the band. UI state (room, volume, window) lives in localStorage `plantpulse_v2_ui`; the energy model's day memory in `plantpulse_energy_history_<room>`.
 
 ## Hardware
 

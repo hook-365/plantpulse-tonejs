@@ -138,7 +138,11 @@ export class BeatClock {
       const [t, item] = p;
       if (item.kind === "beat") this.beatQ.pop(); else this.timeQ.pop();
       this._logical = { time: t, beat: item.kind === "beat" ? item.key : this.secsToBeats(t) };
-      try { item.fn(); } finally { this._logical = null; }
+      //! an error in one routine ends that routine (as a sclang Routine
+      //! dies) and is reported; the rest of the tick still runs
+      try { item.fn(); }
+      catch (e) { (this.onError ?? ((err) => console.error("[clock] routine error", err)))(e); }
+      finally { this._logical = null; }
       n++;
       if (n > 5000000) throw new Error("clock: runaway (5M items in one advance)");
     }

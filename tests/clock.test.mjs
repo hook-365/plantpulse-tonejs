@@ -56,3 +56,16 @@ test("stop() ends a routine; a finished generator schedules nothing more", () =>
   assert.equal(n, 4);
   assert.equal(c.nextDue(), null);
 });
+
+test("an error in one routine ends it and is reported; the others keep time", () => {
+  const c = new VirtualClock({ tempo: 1 });
+  const errors = [];
+  c.onError = (e) => errors.push(e.message);
+  let good = 0, bad = 0;
+  c.play(function* () { for (;;) { good++; yield 1; } });
+  c.play(function* () { bad++; yield 1; bad++; throw new Error("boom"); });
+  c.runUntil(5.5);
+  assert.deepEqual(errors, ["boom"]);
+  assert.equal(bad, 2);
+  assert.equal(good, 6);
+});
