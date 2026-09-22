@@ -2,3 +2,5 @@
 @font-face { font-family: 'Instrument Serif'; font-style: italic; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/InstrumentSerif-italic-400.woff2) format('woff2'); }
 @font-face { font-family: 'Instrument Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/InstrumentSerif-normal-400.woff2) format('woff2'); }
 @font-face { font-family: 'Share Tech Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/ShareTechMono-normal-400.woff2) format('woff2'); }
+/* Cookie (Ania Kruk), SIL Open Font License 1.1: the coffee button, as on hook.technology */
+@font-face { font-family: 'Cookie'; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/Cookie-normal-400.woff2) format('woff2'); }

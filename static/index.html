@@ -171,6 +171,12 @@
     footer { margin-top: 48px; padding: 22px 28px 40px; border-top: 1px solid var(--hairline); display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
     .btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 8px 16px; border-radius: 5px; background: var(--inset); color: var(--fog); border: 1px solid var(--hairline-2); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
     .btn:hover { color: var(--linen); border-color: var(--fog); }
+    /* the coffee button, hook.technology's: Cookie in amber with a glow */
+    .btn.coffee { font-family: 'Cookie', cursive; font-size: 22px; letter-spacing: 0; line-height: 1; padding: 6px 16px;
+                  color: hsl(35, 100%, 50%); border-color: hsl(35, 100%, 40%);
+                  text-shadow: 0 0 5px hsla(35, 100%, 50%, 0.3); box-shadow: 0 0 8px hsla(35, 100%, 50%, 0.3); }
+    .btn.coffee:hover { color: hsl(35, 100%, 60%); border-color: hsl(35, 100%, 50%); text-shadow: 0 0 13px hsla(35, 100%, 50%, 0.3); box-shadow: 0 0 21px hsla(35, 100%, 50%, 0.3); }
+    .btn.coffee svg { width: 16px; height: 16px; fill: currentColor; }
     .foot-note { width: 100%; text-align: center; margin-top: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fog-2); }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
   </style>
@@ -302,7 +308,7 @@
   <footer>
     <a class="btn" href="https://github.com/hook-365/plantpulse-tonejs" rel="noopener">GitHub</a>
     <a class="btn" href="https://github.com/hook-365/plantpulse-hardware" rel="noopener">Hardware</a>
-    <a class="btn" href="https://buymeacoffee.com/anthonyhook" rel="noopener">Buy the plant a coffee</a>
+    <a class="btn coffee" href="https://buymeacoffee.com/anthonyhook" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13a1 1 0 0 1 1 1v2h1.5A2.5 2.5 0 0 1 22 8.5v2a3.5 3.5 0 0 1-3.5 3.5h-.7a7 7 0 0 1-6.8 5H9a7 7 0 0 1-7-7V4a1 1 0 0 1 1-1h1zm14 8h.5a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-.5-.5H18v4zM3 21h16v1.5H3z"/></svg>buy me coffee</a>
     <div class="foot-note">plantpulse.hook.technology</div>
   </footer>
 </body>

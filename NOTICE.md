@@ -19,7 +19,7 @@ archive from the Philharmonia's own bucket and prepares the cello on your
 machine. Credit the Philharmonia Orchestra if you publish audio.
 
 ## Fonts
-Instrument Serif (Astigmatic, Rodrigo Fuenzalida) and Share Tech Mono (Carrois Apostrophe), SIL Open Font License 1.1, self-hosted in `static/vendor/fonts/` so the page makes no third-party request.
+Instrument Serif (Astigmatic, Rodrigo Fuenzalida), Share Tech Mono (Carrois Apostrophe) and Cookie (Ania Kruk), SIL Open Font License 1.1, self-hosted in `static/vendor/fonts/` so the page makes no third-party request.
 
 ## Room pictures
 `static/rooms/*.jpg` are the project's own artwork.
