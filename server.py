@@ -33,6 +33,10 @@ log = logging.getLogger("plantpulse")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+# The page and its modules revalidate on every load (ETag), so a browser
+# never plays yesterday's engine after an upgrade; the sample files carry
+# their own immutable caching below (the version is in their URL).
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 MQTT_HOST = os.environ.get("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))

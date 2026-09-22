@@ -14,6 +14,7 @@ import * as harmony from "./composer/harmony.js";
 import * as arc from "./composer/arc.js";
 import * as lifecycle from "./composer/lifecycle.js";
 import * as voices from "./composer/voices.js";
+import * as improv from "./composer/improv.js";
 import { createAudio } from "./audio/context.js";
 import { installAudio } from "./audio/player.js";
 
@@ -38,6 +39,7 @@ export async function boot({ room = null, log = console.log } = {}) {
   arc.install(C);
   lifecycle.install(C);
   voices.install(C);
+  improv.install(C);
   applyMood(C, roomRec.mood);
   C.weatherLoad();
   clock.play(C.weatherPoll, { sec: true, name: "weather" });
@@ -48,7 +50,13 @@ export async function boot({ room = null, log = console.log } = {}) {
   const app = { C, clock, rooms, room: roomRec, stream, ticker, playing: false };
   app.play = async () => {
     if (app.playing) return;
-    if (!C.audio) { const audio = await createAudio({ volume: app.volume ?? 1 }); installAudio(C, audio); }
+    if (!C.audio) {
+      const audio = await createAudio({ volume: app.volume ?? 1 });
+      installAudio(C, audio, { onSamples: (n, total) => { app.samples = { n, total }; } });
+      //! the piano room waits for its library; drift plays with none
+      app.library = await C.loadSamples();
+      log(`[app] samples: piano ${app.library.piano} cello ${app.library.cello} (${app.library.files} files)`);
+    }
     app.playing = true;
     C.startVoices();
     C.arcRoutine = clock.play(C.arcPoll, { sec: true, name: "arc" });
@@ -100,6 +108,7 @@ function mountDeck(app) {
       $("ppv2-now").textContent = `bar ${C.barIdx}/${C.barsTotal ?? "?"} · ${C.scaleName} on ${C.rootMidi} · ${path} · ${C.arcPhase ?? ""} ${(C.arcIntensity ?? 0).toFixed(2)}`;
     }
     $("ppv2-take").disabled = !C.lastTake;
+    if (app.library && !app.library.piano && app.room.mood === "piano") $("ppv2-now").textContent = "piano samples not fetched: run tools/fetch-samples (drift plays without any)";
   }, 1000);
 }
 

@@ -12,6 +12,7 @@ import * as harmony from "../static/js/composer/harmony.js";
 import * as arc from "../static/js/composer/arc.js";
 import * as lifecycle from "../static/js/composer/lifecycle.js";
 import * as voices from "../static/js/composer/voices.js";
+import * as improv from "../static/js/composer/improv.js";
 import { setRng } from "../static/js/sc.js";
 import { mulberry32 } from "./rng.mjs";
 
@@ -43,6 +44,7 @@ export function band({ room = "drift", seed = 1, signalSeed = 1, warm = 0, log =
   arc.install(C);
   lifecycle.install(C);
   voices.install(C);
+  improv.install(C);
   const audio = fakeAudio(C);
   applyMood(C, room);
   feed(clock, new SignalProcessor(), C.onFeature, makeSignal({ seed: signalSeed }));

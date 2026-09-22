@@ -5,16 +5,35 @@
 //! plant signals every 100 ms (the live engine's control bus).
 import { buildChain, applyMoodFx, moodFx } from "./master.js";
 import { playBreath, playAir, playSubHeld, tuneLiveBeds } from "./breath.js";
+import { makeSampler } from "./sampler.js";
+import { playPiano, playPedalChange } from "./piano.js";
 
-export function installAudio(C, audio) {
+export function installAudio(C, audio, { onSamples = null } = {}) {
   const { ctx, pageOut, toAudio } = audio;
   const chain = buildChain(ctx, moodFx(C.mood), pageOut);
   C.audio = audio;
   C.chain = chain;
   C.onMoodApplied = (mood) => applyMoodFx(chain, moodFx(mood));
 
-  //! the voices this layer implements; pool draws filter on this
+  //! the voices this layer implements; pool draws filter on this. The
+  //! sampled voices join once their packs are fetched (loadSamples): a
+  //! room whose library is absent draws without them.
   C.voices = new Set(["ppBreath", "ppBreathHeld", "ppAir", "ppSubHeld"]);
+  const sampler = makeSampler(ctx, { onCount: (n, total) => onSamples?.(n, total) });
+  C.sampler = sampler;
+  C.loadSamples = async () => {
+    await sampler.loadManifests();
+    if (sampler.has("piano")) C.voices.add("ppPianoSampler");
+    if (sampler.has("cello")) { C.voices.add("ppCello"); C.voices.add("ppCelloLeg"); }
+    await sampler.warmCache();
+    return { piano: sampler.has("piano"), cello: sampler.has("cello"), release: sampler.has("release"), files: sampler.total };
+  };
+  //! the pedal noises on a chord change, when the pianist is pedalling
+  C.pedalChange = () => {
+    if (!(C.pedalNow && (C.mood.leftHandSynth ?? "") === "ppPianoSampler" && sampler.has("release"))) return;
+    C.noteLogMark?.("pedal", "change");
+    playPedalChange(ctx, sampler, C.mood.leftHandLevel ?? 0.7, toAudio(C.clock.beatsToSecs(C.clock.beats)), chain.input);
+  };
 
   //! C.synth(name, args, when): args as sclang's key/value pairs, when in
   //! composer time (logical seconds), converted to the context's clock.
@@ -33,6 +52,8 @@ export function installAudio(C, audio) {
         return playAir(ctx, { f: args.freq, amp: args.amp, dur: args.dur ?? 8.0, pan: args.pan ?? 0 }, t0, dest, sig);
       case "ppSubHeld":
         return playSubHeld(ctx, args.freq, t0, args.amp, dest);
+      case "ppPianoSampler":
+        return playPiano(ctx, sampler, { ...args, vel: C.pianoRoundRobin ? C.pianoRoundRobin(Math.round(args.midinote), args.vel ?? 8) : args.vel }, t0, dest);
       default:
         return null;   //! a voice this layer lacks: logged, drawn, silent
     }

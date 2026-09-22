@@ -21,7 +21,7 @@ export function install(C) {
   C.fireNote = (voice, midinote, amp, dur, pan = 0, vel = 8, extra = null, role = null) => {
     const xtr = extra ?? [];
     const rec = C.noteLogWrite(role, midinote, amp, dur, vel, xtr, voice);
-    const args = { freq: midicps(midinote), midinote, amp, dur, pan };
+    const args = { freq: midicps(midinote), midinote, amp, dur, pan, vel };
     for (let i = 0; i + 1 < xtr.length; i += 2) args[xtr[i]] = xtr[i + 1];
     return C.synth?.(voice, args, rec.t) ?? null;
   };
@@ -144,9 +144,40 @@ export function install(C) {
     }
   };
 
-  //! the right hand and left hand bodies are the pianist's (phase 2 / 3);
-  //! a room whose levels are 0 idles them exactly as the live engine does
-  C.rightHandBody = C.rightHandBody ?? function* () { for (;;) { yield 1.0; } };
+  //! Round-robin for the piano: a same-pitch strike within 1.5 s at the
+  //! same layer is nudged to a neighbouring layer (alternating up/down), so
+  //! no two strikes are the same recording. Velocity itself is untouched.
+  C.pianoLastStrike = new Map();
+  C.pianoRoundRobin = (midi, vel) => {
+    const now = C.clock.now();
+    const last = C.pianoLastStrike.get(midi);
+    let layer = Math.trunc(Math.round(clip(vel, 1, 16)));
+    let dir = 1;
+    if (last != null && now - last.t < 1.5 && last.layer === layer) {
+      dir = -last.dir;
+      layer = clip(layer + dir, 1, 16);
+      if (layer === last.layer) layer = clip(layer - 2 * dir, 1, 16);
+    }
+    C.pianoLastStrike.set(midi, { t: now, layer, dir });
+    return layer;
+  };
+
+  //! the right hand: one phrase after another while its gate is open and
+  //! its level is up; rests the final two bars of a song outro; never starts
+  //! a phrase inside a section's final beats (the seam hold)
+  C.rightHandBody = function* () {
+    for (;;) {
+      const gate = C.voiceGate.rightHand ?? 0;
+      const level = C.mood.rightHandLevel ?? 0;
+      if (level < 0.01 || gate < 0.05 || C.playPhrase == null) { yield 1.0; continue; }
+      if (C.songOutro?.() && C.barsTotal != null && C.barsTotal - C.barIdx <= 2) { yield 1.0; continue; }
+      const seamBeats = C.sectionBarsLeft != null ? C.sectionBarsLeft * 4 - C.beatInBar() : null;
+      if (seamBeats != null && seamBeats < 4 && seamBeats > 0) yield seamBeats;
+      else yield* C.playPhrase();
+    }
+  };
+  //! the left hand is the pianist's (lefthand.js); a room whose level is 0
+  //! idles it exactly as the live engine does
   C.leftHandBody = C.leftHandBody ?? function* () { for (;;) { yield 1.0; } };
 
   //! Phase offsets order the bar line: conductor (quant 4) advances harmony
