@@ -68,6 +68,14 @@ Flask app on port `8286`. No database: the composer keeps its own day of history
 
 **Workers:** gunicorn gevent, 2 workers (`gevent.queue.Queue` when available).
 
+## The composer port (`static/js/`)
+
+The 2.0 engine: a JavaScript port of the live project's SuperCollider composer, one module per `.scd` file so the spec's names carry over (`composer/energy.js`, `harmony.js`, `arc.js`, `lifecycle.js`, `voices.js`; `improv.js`, `lefthand.js`, `strings.js` land with the piano room). `signal.js` is the bridge's feature maths in the browser; `composer/clock.js` is a TempoClock (routines are generators, `yield 4` waits four beats, `yield {sec: 30}` waits on the wall; a tempo change re-anchors at the current beat; routines start on `quant [4, phase]`). `composer/state.js` is the one context every module installs onto (sclang's `~globals`). The audio layer (`audio/master.js`, `breath.js`, `player.js`) is the live engine's SynthDefs node for node in Web Audio; Tone.js is the host context. Data: `static/composer/{moods,mood-schema,rooms}.json` via `tools/sync-composer-data` from the live project (drift and piano only).
+
+Laws, kept by `tools/gate`: the closed mood schema (every key read by its consumer module, every read key in the schema; chairs not yet built are warned, the drummer is a typed hole); raw plant-feature names only in `energy.js` and `signal.js`; no `mood.name ===` branching; comments in `static/js/composer/` are receipts (`//!`) or absent. Tests: `node --test "tests/*.test.mjs"` on a virtual clock (`tests/harness.mjs` seats the band with a fake audio layer).
+
+Until the cut-over the port runs behind `?engine=v2` (`&room=drift|piano`) with its own small deck; the old engine below stays the page's default.
+
 ## Synth Engine (`index.html`)
 
 The entire music system is client-side JavaScript using Tone.js and the Web Audio API.

@@ -85,11 +85,25 @@ RAW_FEATURES = ("activity", "volatility", "signalNorm", "signal_norm", "smoothed
 FREE_ROOMS = {"drift", "piano"}
 JS_DIR = "static/js/composer"
 
-
-def js_consumer(scd_path):
-    """composer/X.scd -> static/js/composer/X.js"""
-    base = os.path.basename(scd_path)
-    return f"{JS_DIR}/{base[:-4]}.js" if base.endswith(".scd") else scd_path
+# The schema names the live project's .scd consumers; the port spreads two
+# of them across modules by chair. A key is consumed when any module in its
+# list reads it; while a list is only partly built the missing keys are
+# WARNED (the phased build stays loud), once every module exists they FAIL.
+CONSUMERS = {
+    "composer/moods.scd": [f"{JS_DIR}/moods.js"],
+    "composer/lifecycle.scd": [f"{JS_DIR}/lifecycle.js"],
+    "composer/harmony.scd": [f"{JS_DIR}/harmony.js"],
+    "composer/voices.scd": [f"{JS_DIR}/voices.js", f"{JS_DIR}/lefthand.js", f"{JS_DIR}/strings.js"],
+    "composer/startup.scd": ["static/js/audio/master.js"],
+    "composer/arc.scd": [f"{JS_DIR}/arc.js"],
+    "composer/energy.scd": [f"{JS_DIR}/energy.js"],
+    "composer/improv.scd": [f"{JS_DIR}/improv.js"],
+    "composer/drums.scd": [f"{JS_DIR}/drums.js"],
+}
+# Deliberate absences, typed: warned on every run so the gap reads as design.
+TYPED_HOLES = {
+    f"{JS_DIR}/drums.js": "the free rooms seat no drummer (drumLevel 0 in drift and piano; lofi's kit is a licensed pack), so the kit keys are data without a reader here",
+}
 
 
 def check_composer():
@@ -142,24 +156,41 @@ def check_composer():
 
     js = {f: open(os.path.join(REPO, f), errors="replace").read()
           for f in tracked(f"{JS_DIR}/*.js")}
+    src_of = {}
+    for mods in CONSUMERS.values():
+        for m in mods:
+            p = os.path.join(REPO, m)
+            if os.path.exists(p):
+                src_of[m] = open(p, errors="replace").read()
 
     # sponsor audit, both directions
-    unbuilt = []
+    awaiting, holes = [], []
     for k, spec in schema.items():
-        consumer = js_consumer(spec["consumer"])
-        if consumer not in js:
-            unbuilt.append(f"{k} -> {consumer}")
-        elif not re.search(rf"\b{re.escape(k)}\b", js[consumer]):
-            fail("composer", f"schema key {k!r} names {consumer} as consumer, but that file never reads it")
-    if unbuilt:
-        print(f"  composer: WARNING {len(unbuilt)} schema keys await their consumer module "
-              f"(phased build): {', '.join(sorted(set(u.split(' -> ')[1] for u in unbuilt)))}")
+        mods = CONSUMERS.get(spec["consumer"], [])
+        built = [m for m in mods if m in src_of]
+        if not mods:
+            fail("composer", f"schema key {k!r} names {spec['consumer']}, which the port does not map")
+        if any(re.search(rf"\b{re.escape(k)}\b", src_of[m]) for m in built):
+            continue
+        if any(m in TYPED_HOLES for m in mods) and not built:
+            holes.append(k)
+        elif len(built) < len(mods):
+            awaiting.append(f"{k} -> {[m for m in mods if m not in src_of][0]}")
+        else:
+            fail("composer", f"schema key {k!r} names {spec['consumer']} as consumer, but none of {mods} reads it")
+    if awaiting:
+        print(f"  composer: WARNING {len(awaiting)} schema keys await their consumer module (phased build): "
+              f"{', '.join(sorted(set(a.split(' -> ')[1] for a in awaiting)))}")
+    for m, reason in TYPED_HOLES.items():
+        if m not in src_of:
+            print(f"  composer: WARNING typed hole {m} ({len([k for k in holes])} keys) — {reason}")
     for k, spec in schema.items():
-        consumer = js_consumer(spec["consumer"])
-        if "vocab" in spec and consumer in js:
-            for word in spec["vocab"]:
-                if word not in js[consumer]:
-                    fail("composer", f"{k} vocab {word!r} never appears in {consumer}")
+        if "vocab" in spec:
+            for m in CONSUMERS.get(spec["consumer"], []):
+                if m in src_of:
+                    for word in spec["vocab"]:
+                        if word not in src_of[m]:
+                            fail("composer", f"{k} vocab {word!r} never appears in {m}")
     for f, src in js.items():
         for k in set(re.findall(r"\bmood\??\.(\w+)", src)):
             if k not in schema:
