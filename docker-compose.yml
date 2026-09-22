@@ -1,26 +1,50 @@
 services:
   plantpulse:
     build: .
-    container_name: plantpulse
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8286:8286"
+      - "8286:8286"        # LAN-reachable; use "127.0.0.1:8286:8286" behind a reverse proxy
     environment:
-      - DB_HOST=timescaledb
-      - DB_PORT=5432
-      - DB_NAME=plantpulse
-      - DB_USER=plantpulse
-      - DB_PASS=plantpulse
       - MQTT_HOST=${MQTT_HOST:-mosquitto}
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_USER=${MQTT_USER:-plantpulse}
-      - MQTT_PASS=${MQTT_PASS}
-    networks:
-      seg_monitoring:
-      seg_iot:
+      - MQTT_PASS=${MQTT_PASS:?set MQTT_PASS in .env}
+      - PLANTPULSE_SAMPLES_DIR=/app/samples
+      - PLANTPULSE_RECORDINGS_DIR=/app/recordings
+    volumes:
+      - ./samples/web:/app/samples:ro      # empty until tools/fetch-samples; the drift room needs nothing
+      - ./recordings:/app/recordings       # take receipts (tools/take-review)
+      - ./static/config.json:/app/static/config.json:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8286/healthz', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
-networks:
-  seg_monitoring:
-    external: true
-  seg_iot:
-    external: true
+  # Optional: a broker, if you do not already run one (docker compose --profile broker up -d).
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["broker", "demo"]
+    restart: unless-stopped
+    ports:
+      - "1883:1883"        # the ESP32 connects here
+    volumes:
+      - ./mosquitto:/mosquitto/config
+      - mosquitto-data:/mosquitto/data
+
+  # Optional: a fake plant, for a trial with no hardware (docker compose --profile demo up).
+  simulate:
+    build: .
+    profiles: ["demo"]
+    command: ["python", "tools/simulate-signal"]
+    environment:
+      - MQTT_HOST=${MQTT_HOST:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USER=${MQTT_USER:-plantpulse}
+      - MQTT_PASS=${MQTT_PASS:?set MQTT_PASS in .env}
+    depends_on:
+      - mosquitto
+
+volumes:
+  mosquitto-data:

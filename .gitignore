@@ -16,3 +16,13 @@ history/.venv/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Fetched, never committed (tools/fetch-samples; see NOTICE.md)
+samples/
+# Take receipts the browser posts (tools/take-review reads them)
+recordings/
+# Local configuration
+.env
+
+# The bundled broker's password file (tools/broker-password)
+mosquitto/passwd

@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
 COPY static/ static/
+COPY tools/simulate-signal tools/simulate-signal
 
 EXPOSE 8286
 

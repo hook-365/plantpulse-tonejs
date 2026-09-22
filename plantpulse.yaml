@@ -27,10 +27,10 @@ ota:
 
 # MQTT — publish raw ADC readings, broker handles distribution
 mqtt:
-  broker: 192.168.1.200      # Your MQTT broker IP
+  broker: !secret mqtt_broker      # the machine running docker compose, or your own broker
   port: 1883
   topic_prefix: plantpulse
-  username: plantpulse
+  username: !secret mqtt_username
   password: !secret mqtt_password
 
 # I2C bus for ADS1115
@@ -39,14 +39,16 @@ i2c:
   scl: GPIO22
   scan: true
 
-# ADS1115 16-bit ADCs with PGA
-# Chip 1 (ADDR→GND): alligator clips
-# Chip 2 (ADDR→VDD): TENS sticky pads
+# ADS1115 16-bit ADC with PGA
+# Chip 1 (ADDR→GND): alligator clips. One chip is the default build.
 ads1115:
   - address: 0x48
     id: ads_clips
-  - address: 0x49
-    id: ads_pads
+  # Optional second chip (ADDR→VDD), e.g. for TENS sticky pads on a second
+  # plant or a second site on the same plant. Uncomment here and the
+  # "Plant Signal 3" sensor below.
+  # - address: 0x49
+  #   id: ads_pads
 
 sensor:
   # Chip 1 (0x48), differential A0-A1 — alligator clips (original)
@@ -71,13 +73,13 @@ sensor:
     unit_of_measurement: "V"
     accuracy_decimals: 6
 
-  # Chip 2 (0x49), differential A0-A1 — TENS sticky pads
-  - platform: ads1115
-    ads1115_id: ads_pads
-    multiplexer: 'A0_A1'
-    gain: 0.256
-    name: "Plant Signal 3"
-    id: plant_signal_3
-    update_interval: 250ms
-    unit_of_measurement: "V"
-    accuracy_decimals: 6
+  # Chip 2 (0x49), differential A0-A1 — optional (see ads1115 above)
+  # - platform: ads1115
+  #   ads1115_id: ads_pads
+  #   multiplexer: 'A0_A1'
+  #   gain: 0.256
+  #   name: "Plant Signal 3"
+  #   id: plant_signal_3
+  #   update_interval: 250ms
+  #   unit_of_measurement: "V"
+  #   accuracy_decimals: 6

@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""fetch-samples: build the free rooms' sample libraries from their sources.
+
+PlantPulse ships no samples. The piano room plays the Salamander Grand
+Piano (Alexander Holm, CC BY 3.0) and, about half its takes, the
+Philharmonia Orchestra's cello; drift is synthesized end to end and needs
+nothing here. Salamander may be redistributed with attribution; the
+Philharmonia terms allow any use, commercial included, but the samples
+"must not be sold or made available 'as is' (i.e. as samples or as a
+sampler instrument)", which a folder of cello notes in a repo would be.
+So nothing is packaged: this tool downloads both from their publishers
+and lays the library out the way the engine and the web page read it
+so a self-hoster gets the piano room for free.
+
+Output (LIB defaults to ./samples, which docker-compose.yml mounts and
+.gitignore ignores; --lib for anywhere else):
+
+  salamander/                480 note wavs A0..C8 x v1..v16, plus the
+                             release resonances, hammer noises and
+                             pedal noises (instruments/samples.scd
+                             ~loadPianoSamples / ~loadPianoReleases)
+  strings_v1/cello/          49 pianissimo bows C2..C6, mono 44.1 k 16-bit
+  strings_v2/cello_{pp,mp,f} the three dynamics ppCello chooses among
+  strings_v2/loops.json      each bow's measured sustain plateau
+  web/piano_web_v1           the roll page's piano: three velocity layers
+  web/piano_release_web_v1   key-up resonances, hammer and pedal noises
+  web/cello_web_v1           the roll page's cello
+
+Every step is idempotent: existing files are kept, so a broken download
+resumes where it stopped and the tool is safe to re-run after an upgrade.
+Requires python3 and ffmpeg (tar, xz and zip are handled in Python).
+
+Salamander comes as 44.1 kHz 16-bit by default (412 MB); --hifi takes the
+48 kHz 24-bit master (1.2 GB). The browser packs are 44.1 k mp3 either way;
+--prune deletes the intermediate wavs once the packs are built (~1 GB back).
+
+Receipts: this tool was reconciled file for file against the hand-built
+library the live PlantPulse engine runs (2026-09-22): same Salamander file
+set, same three web packs with manifests equal key for key, every cello bow
+matched by duration against the publisher's archive.
+"""
+import argparse, io, json, math, os, re, shutil, struct, subprocess, sys
+import tarfile, urllib.request, zipfile
+
+SALAMANDER = {
+    "small": ("https://freepats.zenvoid.org/Piano/SalamanderGrandPiano/"
+              "SalamanderGrandPianoV3+20161209_44khz16bit.tar.xz", "44.1khz16bit"),
+    "hifi":  ("https://freepats.zenvoid.org/Piano/SalamanderGrandPiano/"
+              "SalamanderGrandPianoV3+20161209_48khz24bit.tar.xz", "48khz24bit"),
+}
+PHIL_STRINGS = ("https://philharmonia-assets.s3-eu-west-1.amazonaws.com/"
+                "uploads/2020/02/12112005/Strings.zip")
+
+# Philharmonia file: cello_<pitch>_<duration>_<dynamic>_<articulation>.mp3
+# Each set is an ordered preference list of (duration, dynamic); the first
+# arco-normal bow a pitch has wins. Durations are the publisher's labels
+# ("15" = 1.5 s, "1" = 1 s; the 0.25 and 0.5 s bows are too short to loop).
+CELLO_SETS = {
+    "cello_pp": [("15", "pianissimo"), ("1", "pianissimo"), ("15", "piano"),
+                 ("1", "piano"), ("15", "mezzo-piano"), ("1", "mezzo-piano"),
+                 ("15", "forte"), ("1", "forte"), ("15", "fortissimo")],
+    "cello_mp": [("15", "mezzo-piano"), ("1", "mezzo-piano"), ("15", "piano"),
+                 ("1", "piano"), ("15", "forte"), ("1", "forte"), ("1", "fortissimo")],
+    "cello_f":  [("15", "forte"), ("1", "forte"), ("15", "fortissimo"), ("1", "fortissimo")],
+}
+CELLO_MIDI = range(36, 85)          # C2..C6, what \ppCello was tuned on
+PIANO_WEB_LAYERS = (4, 9, 14)       # piano_web_v1: soft / mid / loud
+
+
+def log(*a): print("[fetch-samples]", *a, flush=True)
+
+
+def download(url, dst):
+    if os.path.exists(dst):
+        log("have", os.path.basename(dst)); return dst
+    part = dst + ".part"
+    done = os.path.getsize(part) if os.path.exists(part) else 0
+    req = urllib.request.Request(url, headers={"Range": f"bytes={done}-"} if done else {})
+    with urllib.request.urlopen(req) as r, open(part, "ab" if done else "wb") as f:
+        total = int(r.headers.get("Content-Length", 0)) + done
+        got = done
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk: break
+            f.write(chunk); got += len(chunk)
+            if total: print(f"\r  {os.path.basename(dst)} {got * 100 // total:3d}%  {got >> 20} MB", end="", flush=True)
+    print()
+    os.replace(part, dst); return dst
+
+
+def ffmpeg(src, dst, *args):
+    if os.path.exists(dst): return False
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", src, *args, dst + ".tmp" + os.path.splitext(dst)[1]], check=True)
+    os.replace(dst + ".tmp" + os.path.splitext(dst)[1], dst); return True
+
+
+def mp3(src, dst, kbps, mono):
+    return ffmpeg(src, dst, "-ar", "44100", "-codec:a", "libmp3lame", "-b:a", f"{kbps}k", *(["-ac", "1"] if mono else []))
+
+
+# ---------------------------------------------------------------- Salamander
+def sample_name(midi):
+    return ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][midi % 12] + str(midi // 12 - 1)
+
+
+def fetch_salamander(lib, dl, flavour):
+    url, sub = SALAMANDER[flavour]
+    out = f"{lib}/salamander"; os.makedirs(out, exist_ok=True)
+    tarball = download(url, f"{dl}/{os.path.basename(url)}")
+    want = re.compile(r"^(?:[A-G]#?\d+v\d+|harm[SL][A-G]#?\d+|harmV3[A-G]#?\d+|rel\d+|pedal[DU]\d)\.wav$")
+    n = 0
+    with tarfile.open(tarball, "r:xz") as t:
+        for m in t:
+            base = os.path.basename(m.name)
+            keep = (m.isfile() and (want.match(base) or base in ("README",) or base.endswith(".sfz")))
+            if not keep: continue
+            dst = f"{out}/{base}"
+            if os.path.exists(dst): continue
+            with t.extractfile(m) as src, open(dst + ".tmp", "wb") as f:
+                shutil.copyfileobj(src, f)
+            os.replace(dst + ".tmp", dst); n += 1
+            if n % 50 == 0: print(f"\r  extracted {n}", end="", flush=True)
+    print()
+    notes = [f for f in os.listdir(out) if re.match(r"^[A-G]#?\d+v\d+\.wav$", f)]
+    log(f"salamander: {len(notes)} note files (expect 480), {n} extracted this run, {sub}")
+    if len(notes) != 480: sys.exit("salamander: note count is wrong; delete the tarball in .downloads and retry")
+
+
+def pack_piano_web(lib):
+    src = f"{lib}/salamander"; out = f"{lib}/web/piano_web_v1"; os.makedirs(out, exist_ok=True)
+    notes, urls = {}, {}
+    for midi in range(21, 109):
+        if midi % 12 not in (0, 3, 6, 9): continue
+        name = sample_name(midi); layers = {}
+        for v in PIANO_WEB_LAYERS:
+            wav = f"{src}/{name}v{v}.wav"
+            if not os.path.exists(wav): continue
+            fn = f"{name.replace('#', 's')}v{v}.mp3"
+            mp3(wav, f"{out}/{fn}", 96, mono=False); layers[str(v)] = fn
+        if layers:
+            notes[name.replace("#", "s")] = {"midi": midi, "layers": layers}
+            urls[name] = layers[str(PIANO_WEB_LAYERS[1])]          # "D#1": Tone-style keys, files spell it "Ds1"
+    json.dump({"version": 1, "tier": "free", "release": 1, "instrument": "piano",
+               "source": "Salamander Grand Piano V3 by Alexander Holm, CC BY 3.0 (https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), three of the sixteen velocity layers for the web",
+               "layers": list(PIANO_WEB_LAYERS), "notes": notes, "urls": urls},
+              open(f"{out}/manifest.json", "w"), indent=1)
+    log(f"piano_web_v1: {len(notes)} pitches x {len(PIANO_WEB_LAYERS)} layers")
+
+
+def pack_piano_release_web(lib):
+    src = f"{lib}/salamander"; out = f"{lib}/web/piano_release_web_v1"; os.makedirs(out, exist_ok=True)
+    notes, urls, rel = {}, {}, {}
+    for midi in range(21, 109, 3):
+        name = sample_name(midi); layers = {}
+        for L in ("S", "L"):
+            wav = f"{src}/harm{L}{name}.wav"
+            if not os.path.exists(wav): continue
+            fn = f"harm{L}{name.replace('#', 's')}.mp3"
+            mp3(wav, f"{out}/{fn}", 80, mono=False); layers[L] = fn
+        if layers:
+            notes[name.replace("#", "s")] = {"midi": midi, "layers": layers}
+            urls[name] = layers.get("L") or layers["S"]
+    for k in range(1, 89):
+        wav = f"{src}/rel{k}.wav"
+        if os.path.exists(wav):
+            mp3(wav, f"{out}/rel{k}.mp3", 80, mono=False); rel[str(k + 20)] = f"rel{k}.mp3"
+    pedals = {}
+    for p in ("pedalD", "pedalU"):
+        pedals[p] = []
+        for i in (1, 2):
+            wav = f"{src}/{p}{i}.wav"
+            if os.path.exists(wav):
+                mp3(wav, f"{out}/{p}{i}.mp3", 80, mono=False); pedals[p].append(f"{p}{i}.mp3")
+    json.dump({"version": 1, "tier": "free", "release": 1, "instrument": "piano-release",
+               "source": "Salamander Grand Piano V3 by Alexander Holm, CC BY 3.0: release resonances, hammer and pedal noises",
+               "layers": ["S", "L"], "notes": notes, "urls": urls,
+               "extras": {"rel": rel, "pedalD": pedals["pedalD"], "pedalU": pedals["pedalU"]}},
+              open(f"{out}/manifest.json", "w"), indent=1)
+    log(f"piano_release_web_v1: {len(notes)} resonance pitches, {len(rel)} hammer, {len(pedals['pedalD']) + len(pedals['pedalU'])} pedal")
+
+
+# ---------------------------------------------------------------- Philharmonia cello
+def phil_midi(name):
+    pc = dict(C=0, D=2, E=4, F=5, G=7, A=9, B=11)[name[0]]; rest = name[1:]
+    if rest.startswith("s"): pc += 1; rest = rest[1:]
+    return pc + (int(rest) + 1) * 12
+
+
+def fetch_cello_mp3s(dl):
+    z = download(PHIL_STRINGS, f"{dl}/Strings.zip")
+    out = f"{dl}/philharmonia_cello"; os.makedirs(out, exist_ok=True)
+    with zipfile.ZipFile(z) as zf:
+        names = [n for n in zf.namelist() if n.startswith("Strings/cello/cello_") and n.endswith(".mp3")]
+        for n in names:
+            dst = f"{out}/{os.path.basename(n)}"
+            if not os.path.exists(dst):
+                with zf.open(n) as s, open(dst, "wb") as f: shutil.copyfileobj(s, f)
+    log(f"philharmonia cello: {len(names)} source files")
+    return out
+
+
+def pick_bows(srcdir, prefs):
+    have = {}
+    for f in os.listdir(srcdir):
+        m = re.match(r"cello_([A-G]s?\d)_(\w+)_([\w-]+)_arco-normal\.mp3$", f)
+        if m: have[(m.group(1), m.group(2), m.group(3))] = f
+    picks = {}
+    for midi in CELLO_MIDI:
+        pitch = ["C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"][midi % 12] + str(midi // 12 - 1)
+        for dur, dyn in prefs:
+            if (pitch, dur, dyn) in have:
+                picks[pitch] = have[(pitch, dur, dyn)]; break
+    return picks
+
+
+def pcm_mono(path):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "44100", "-"],
+                         capture_output=True, check=True).stdout
+    return struct.unpack(f"<{len(raw) // 2}h", raw)
+
+
+def plateau(x, sr=44100, hop=0.01, db=6.0, smooth=11, guard=0.15):
+    """[start, end] in seconds of the bow's sustain: the longest run of
+    10 ms RMS frames (envelope smoothed over `smooth` frames so vibrato
+    does not break it) within `db` of the loudest, pulled in by `guard` at
+    each end so the loop never touches the attack or the release.
+    Calibrated 2026-09-22 against the 139 loop points Apollo's lost tool
+    wrote: median 0.04 s off at the start, 0.05 s at the end, p90 0.10 /
+    0.32 s; three loops under 0.3 s, two of which were that short before
+    (the unsmoothed envelope gave 24)."""
+    n = int(sr * hop)
+    frames = [math.sqrt(sum(v * v for v in x[i:i + n]) / n) + 1e-9 for i in range(0, len(x) - n, n)]
+    h = smooth // 2
+    frames = [sum(frames[max(0, i - h):i + h + 1]) / len(frames[max(0, i - h):i + h + 1]) for i in range(len(frames))]
+    thr = max(frames) * 10 ** (-db / 20)
+    best, i = (0, 0), 0
+    while i < len(frames):
+        if frames[i] >= thr:
+            j = i
+            while j < len(frames) and frames[j] >= thr: j += 1
+            if j - i > best[1] - best[0]: best = (i, j)
+            i = j
+        else:
+            i += 1
+    a, b = best[0] * hop + guard, best[1] * hop - guard
+    return [round(a, 2), round(max(b, a + 0.2), 2)]
+
+
+def build_cello(lib, srcdir):
+    loops_path = f"{lib}/strings_v2/loops.json"
+    loops = json.load(open(loops_path)) if os.path.exists(loops_path) else {}
+    for setname, prefs in CELLO_SETS.items():
+        out = f"{lib}/strings_v2/{setname}"; os.makedirs(out, exist_ok=True)
+        picks = pick_bows(srcdir, prefs); made = 0
+        for pitch, f in picks.items():
+            made += ffmpeg(f"{srcdir}/{f}", f"{out}/{pitch}.wav", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le")
+            key = f"{setname}/{pitch}"
+            if key not in loops: loops[key] = plateau(pcm_mono(f"{out}/{pitch}.wav"))
+        log(f"strings_v2/{setname}: {len(picks)} bows ({made} written)")
+    json.dump(loops, open(loops_path, "w"), indent=0)
+    # strings_v1/cello is the single-dynamic fallback \ppCello keeps loaded: the pianissimo set
+    v1 = f"{lib}/strings_v1/cello"; os.makedirs(v1, exist_ok=True)
+    for f in os.listdir(f"{lib}/strings_v2/cello_pp"):
+        if f.endswith(".wav") and not os.path.exists(f"{v1}/{f}"): shutil.copy2(f"{lib}/strings_v2/cello_pp/{f}", f"{v1}/{f}")
+    log(f"strings_v1/cello: {len(os.listdir(v1))} bows")
+
+
+def pack_cello_web(lib):
+    src = f"{lib}/strings_v1/cello"; out = f"{lib}/web/cello_web_v1"; os.makedirs(out, exist_ok=True)
+    notes, urls = {}, {}
+    for f in sorted(os.listdir(src)):
+        if not f.endswith(".wav"): continue
+        name = f[:-4]; mp3(f"{src}/{f}", f"{out}/{name}.mp3", 80, mono=True)
+        notes[name] = {"midi": phil_midi(name), "layers": {"1": f"{name}.mp3"}}; urls[name.replace("s", "#")] = f"{name}.mp3"
+    json.dump({"version": 1, "tier": "free", "release": 1, "instrument": "cello",
+               "source": "Philharmonia Orchestra cello, pianissimo arco bows (https://philharmonia.co.uk/resources/sound-samples/; free for any use, not to be made available as samples: fetched by tools/fetch-samples, never redistributed)",
+               "layers": [1], "notes": notes, "urls": urls}, open(f"{out}/manifest.json", "w"), indent=1)
+    log(f"cello_web_v1: {len(notes)} pitches")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    import os as _os
+    ap.add_argument("--lib", default=_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "samples"),
+                    help="library root (default ./samples, mounted by docker compose)")
+    ap.add_argument("--prune", action="store_true", help="delete the intermediate wavs after the web packs are built")
+    ap.add_argument("--hifi", action="store_true", help="Salamander 48 kHz 24-bit master (1.2 GB) instead of 44.1 kHz 16-bit (412 MB)")
+    ap.add_argument("--only", choices=["piano", "cello"], help="one library instead of both")
+    ap.add_argument("--no-web", action="store_true", help="engine library only, skip the roll page's mp3 packs")
+    a = ap.parse_args()
+    if not shutil.which("ffmpeg"): sys.exit("ffmpeg is required")
+    dl = f"{a.lib}/.downloads"; os.makedirs(dl, exist_ok=True)
+    if a.only != "cello":
+        fetch_salamander(a.lib, dl, "hifi" if a.hifi else "small")
+        if not a.no_web: pack_piano_web(a.lib); pack_piano_release_web(a.lib)
+    if a.only != "piano":
+        build_cello(a.lib, fetch_cello_mp3s(dl))
+        if not a.no_web: pack_cello_web(a.lib)
+    if a.prune:
+        for d in ("salamander", "strings_v1", "strings_v2"):
+            p = f"{a.lib}/{d}"
+            if os.path.isdir(p): shutil.rmtree(p); log(f"pruned {d}/")
+    log("done. Attribution for anything you publish from this: "
+        "Salamander Grand Piano V3 by Alexander Holm (CC BY 3.0); "
+        "cello samples by the Philharmonia Orchestra (philharmonia.co.uk).")
+
+
+if __name__ == "__main__":
+    main()

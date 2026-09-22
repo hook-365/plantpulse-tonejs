@@ -11,7 +11,7 @@ PlantPulse reads bioelectrical signals from living plants via an ESP32 + ADS1115
 Plant leaf → alligator clips → ADS1115 (16-bit I2C ADC, ±256mV)
   → ESP32-WROOM-32D (WiFi + MQTT)
   → Mosquitto broker
-  → Flask server (SSE proxy, history API, TimescaleDB)
+  → Flask server (SSE proxy, sample packs)
   → Browser (Tone.js / Web Audio API synth engine)
 ```
 
@@ -24,52 +24,49 @@ Plant leaf → alligator clips → ADS1115 (16-bit I2C ADC, ±256mV)
 ## Repository Structure
 
 ```
-plantpulse/
-├── index.html          # MAIN FRONTEND — entire synth engine (~144KB, all client-side)
-├── server.py           # Flask: SSE bridge, TimescaleDB history API
-├── simulate.py         # Signal simulator for dev/testing without hardware
-├── plantpulse.yaml     # ESPHome config for the ESP32
-├── docker-compose.yml  # Deployment: Flask + TimescaleDB + Mosquitto
-├── Dockerfile          # Flask container
-├── config.json         # Plant identity config (name, type, location) — served publicly
-├── secrets.yaml        # MQTT credentials (gitignored)
+plantpulse-tonejs/
+├── server.py           # Flask: MQTT→SSE bridge, /config.json, /healthz, /api/samples/*, POST /api/take
+├── static/index.html   # THE page (served at /): the Tone.js engine, being replaced by the composer port
+├── static/config.json  # Plant identity (name, type, location) — served publicly, no credentials
+├── tools/fetch-samples # Downloads Salamander (CC BY 3.0) + the Philharmonia cello into samples/ (never committed)
+├── tools/simulate-signal # A fake plant on MQTT at 4 Hz (docker compose --profile demo)
+├── tools/broker-password # Writes the bundled broker's password file from .env
+├── mosquitto/          # mosquitto.conf for the optional bundled broker (--profile broker)
+├── samples/            # gitignored; tools/fetch-samples output, mounted read-only into the container
+├── recordings/         # gitignored; take receipts the browser posts (spool/*.notes.jsonl, takes.jsonl)
+├── plantpulse.yaml     # ESPHome config for the ESP32 (broker + username from secrets.yaml)
 ├── secrets.yaml.example
-├── requirements.txt
-├── static/             # Static assets served by Flask
-├── docs/               # Screenshots, documentation assets
-├── history/            # Historical data exports
-├── MUSIC.md            # Full music engine parameter reference (signal math, layer logic, presets)
-└── README.md           # Full project documentation including hardware wiring
+├── docker-compose.yml  # plantpulse + optional mosquitto (broker/demo) + optional simulate (demo)
+├── Dockerfile, .dockerignore, .env.example, requirements.txt
+├── LICENSE (MIT), NOTICE.md (sample and library attributions)
+├── docs/               # Screenshot
+└── README.md
 ```
 
-> **Note:** `index.html` is currently at the repo root but is served from `static/` by Flask. Check `server.py` `send_from_directory` calls if the static layout changes.
+**Never add a `server/` package beside `server.py`:** gunicorn's target is `server:app`, and Python prefers a package over a module of the same name ("Failed to find attribute 'app' in 'server'").
 
 ## Server (`server.py`)
 
-Flask app on port `8286`.
+Flask app on port `8286`. No database: the composer keeps its own day of history in the browser.
 
 **Routes:**
-- `GET /` → `static/index.html` (main dashboard)
-- `GET /history` → `static/history.html`
-- `GET /stream` → `static/stream.html` (OBS browser source, no controls)
-- `GET /api/stream` → SSE stream (MQTT → browser fan-out via per-client Queue)
-- `GET /api/data` → TimescaleDB signal history (auto-resolution based on time range)
-- `GET /api/range` → Available data time range
-- `GET /api/stats` → Summary stats for a time range
-- `GET /api/hourly` → Hourly aggregates
-- `POST /api/music-log` / `GET /api/music-log` → Circular buffer of note events from client
-- `GET /api/music-log/stats` → Note frequency, timing stats
-- `POST /api/signal-log` / `GET /api/signal-log` → Signal snapshot buffer
-- `GET /config.json` → Plant config (no credentials)
+- `GET /` → `static/index.html`
+- `GET /config.json` → plant identity (no credentials)
+- `GET /logo.svg`
+- `GET /healthz` → `{ok, sse_clients, mqtt_started}` (the compose healthcheck; no broker round-trip)
+- `GET /api/stream` → SSE: `{"ch":"ch1","v":<volts>}` per reading, `{"hb":1}` every 5 s when quiet (a data frame, so the client watchdog sees it)
+- `GET /api/samples/<pack>/manifest` → `{pack, version, baseUrl, urls, release, layers?, notes?, instrument?, extras?}`; 404 `unknown_pack` until `tools/fetch-samples` has run (the drift room plays regardless)
+- `GET /api/samples/<pack>/<version>/<file>` → the sample, `Cache-Control: immutable` (the version is in the URL)
+- `POST /api/take` → `{meta, lines}`: writes `recordings/spool/<stamp>__<room>__web.notes.jsonl` and appends `recordings/takes.jsonl`, the files `tools/take-review` reads; the name is validated, nothing is served back
 
 **MQTT topics:**
 - `plantpulse/sensor/plant_signal/state` → `ch1` (Chip 1 A0–A1)
 - `plantpulse/sensor/plant_signal_2/state` → `ch2` (Chip 1 A2–A3)
-- `plantpulse/sensor/plant_signal_3/state` → `ch3` (Chip 2 A0–A1, TENS pads)
+- `plantpulse/sensor/plant_signal_3/state` → `ch3` (Chip 2 A0–A1, optional)
 
-**SSE heartbeat:** Sends `{"hb": 1}` every 5s when MQTT is quiet so the client watchdog doesn't false-positive on silent plant periods.
+**MQTT connect:** `connect_async` + `loop_start`, so a broker that comes up after the server (the usual compose race) is picked up without a restart. The subscriber starts on the first `/api/stream` request, per gunicorn worker.
 
-**Workers:** Compatible with gunicorn gevent workers (uses `gevent.queue.Queue` when available).
+**Workers:** gunicorn gevent, 2 workers (`gevent.queue.Queue` when available).
 
 ## Synth Engine (`index.html`)
 
@@ -97,25 +94,10 @@ Each preset defines: synth types, effect chains, drum kit, drummer personality (
 
 Current presets: Default, Bells, Pad, Pluck, Wind, Glass, Ethereal, Organic, Synth Wave, Crystal Cave, Midnight, Circuit, Piano, Lo-Fi.
 
-See `MUSIC.md` for full parameter tables.
+(The engine and its presets are being replaced by the composer port; this section describes the page as it still is.)
 
 ### Multi-Channel Support
 Up to 3 differential channels across 2 ADS1115 chips. Patch bay in UI routes any channel to any synth parameter.
-
-## Active Development Focus
-
-### Server-Gated Presets (Monetization Path)
-The current concern: all 14 presets + the full synth engine are visible in `index.html` via view source. The planned approach is **server-gated presets**:
-- Preset *configs* (synth params, effect chains, arrangement structures) move to the server behind an auth/tier check
-- Synthesis engine stays client-side (latency matters for real-time plant music)
-- Free tier: Default + 2–3 presets
-- Paid tier: all presets + future preset packs
-- The motif DNA system and core signal processing remain in the client
-
-This is the primary architectural change being explored. When working on this:
-- Preset configs should be extracted from `index.html` into a structured format (JSON per preset)
-- A new Flask endpoint (e.g. `GET /api/presets`) serves configs based on auth token
-- The client fetches available presets on load rather than having them hardcoded
 
 ## Hardware
 
@@ -131,22 +113,21 @@ Wiring: ADS1115 VDD→3.3V, GND→GND, SCL→GPIO22, SDA→GPIO21, ADDR→GND (0
 
 ```bash
 # Flash ESP32
-cp secrets.yaml.example secrets.yaml
-# edit secrets.yaml
+cp secrets.yaml.example secrets.yaml      # WiFi, OTA, broker address, MQTT credentials
 esphome run plantpulse.yaml
 
 # Deploy server
-echo "MQTT_USER=plantpulse\nMQTT_PASS=yourpass" > .env
-docker compose up -d
+cp .env.example .env && $EDITOR .env      # MQTT_* (+ PLANTPULSE_SAMPLES_DIR)
+docker compose up -d                       # with your own broker (MQTT_HOST in .env), or:
+tools/broker-password && docker compose --profile broker up -d   # the bundled mosquitto
+docker compose --profile demo up           # no hardware: bundled broker + a fake plant
+tools/fetch-samples                        # the piano room's samples (~580 MB; needs ffmpeg); drift needs none
 # Dashboard: http://localhost:8286
 ```
 
-Nginx SSE config requires `proxy_buffering off`, `proxy_cache off`, `proxy_read_timeout 86400`, `X-Accel-Buffering no` on the `/api/stream` location.
-
 ## Dev Notes
 
-- `simulate.py` generates fake plant signals for local dev without hardware
-- `config.json` is public (plant name/type/location only — no credentials)
-- `secrets.yaml` is gitignored; never commit MQTT credentials
-- Console telemetry logs every 10s while playing (per-layer trigger counts, gaps, skips)
-- TimescaleDB auto-resolution: raw ≤10min, 5s ≤1h, 1min ≤6h, 5min ≤1d, 1hour else
+- `tools/simulate-signal --dry-run` prints the fake plant's values without a broker
+- `config.json` is `static/config.json` (served at `/config.json`): plant name/type/location only
+- `secrets.yaml` and `.env` are gitignored; never commit credentials
+- Samples are fetched, never committed (`samples/` is gitignored; licences in `NOTICE.md`)

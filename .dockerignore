@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+secrets.yaml
+.esphome
+samples
+recordings
+tests
+docs
+handoff
+node_modules
+__pycache__
+*.pyc
+.venv
+.claude
