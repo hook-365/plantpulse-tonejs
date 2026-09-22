@@ -4,7 +4,9 @@
 
 PlantPulse reads the bioelectrical signal of a living plant through two alligator clips on a leaf and turns it into music, live, in your browser. Not a voltage-to-pitch mapper: a composer that hears the plant as four signals ranked against its own day and plays from them. Two rooms, a drone and a piano. About $15 of hardware, no cloud, nothing leaves your network.
 
-![PlantPulse](docs/screenshot.jpg)
+![PlantPulse: the stage](docs/screenshot.jpg)
+
+![PlantPulse: the roll, the leaf's voltage above the notes it chose](docs/screenshot-roll.jpg)
 
 **[Listen live](https://plantpulse.hook.technology)**: a hibiscus performs around the clock. That site runs the project's SuperCollider engine; this repository is the free browser port of the same musical decisions, for your own plant. (The old Tone.js preset engine this repo once held is [release v1.0.0](https://github.com/hook-365/plantpulse-tonejs/releases/tag/v1.0.0).)
 

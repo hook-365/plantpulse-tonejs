@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.0] - 2026-09-22
+
+The live site's page.
+
+### Changed
+- The page is the live project's front page, driven by the local composer: the stage with the room's picture and the leaf's trace as the backdrop, room pills, one deck card, the now-playing line, the players' words, the track's progress, and on play the piano roll under a shrunken stage (the leaf's voltage above the notes it chose, one clock, section / hook / cello markers, the drone's knobs in drift, held voices drawn to the next chord). The 2.0 page was the classic dashboard's chrome.
+- The composer runs three seconds ahead of the audio clock so the roll shows each note arriving.
+- Chart.js is gone; three fonts (Instrument Serif, Share Tech Mono, Cookie; all OFL) are self-hosted, so the page still makes no third-party request.
+- The footer is the live site's, coffee button and all.
+
 ## [2.0.0] - 2026-09-22
 
 The composer, in your browser.
@@ -11,7 +21,7 @@ The composer, in your browser.
 - `docker compose up` works on a fresh machine: no external networks, an optional bundled broker (`--profile broker`, `tools/broker-password`), an optional fake plant (`--profile demo`, `tools/simulate-signal`), a healthcheck.
 - The server reconnects to a broker that comes up late (the old synchronous connect stayed deaf after one failure), serves the sample packs (`/api/samples/*`), spools each take's note log (`POST /api/take`), and sends no-cache for its static files so a browser never plays yesterday's engine.
 - `plantpulse.yaml` takes the broker address and username from `secrets.yaml`; the second ADS1115 is an optional block.
-- The page is the live project's front page (stage, room pills, deck, players' words, progress, and the piano roll with the leaf's trace on the same clock), driven by the local composer. No third-party requests: the two fonts are self-hosted.
+- No third-party requests from the page.
 - Tone.js is not used. The port's instruments are the live engine's SynthDefs node for node in plain Web Audio on the browser's own context. The repository's name is history.
 
 ### Removed
