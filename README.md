@@ -2,92 +2,48 @@
 
 **Your plant is making music right now. You just can't hear it yet.**
 
-PlantPulse captures the invisible bioelectrical signals flowing through living plants and transforms them into real-time generative music. Every note, every rhythm, every chord change is driven by your plant's actual electrical activity — not random, not pre-programmed, genuinely alive.
+PlantPulse reads the bioelectrical signal of a living plant through two alligator clips on a leaf and turns it into music, live, in your browser. Not a voltage-to-pitch mapper: a composer that hears the plant as four signals ranked against its own day and plays from them. Two rooms, a drone and a piano. About $15 of hardware, no cloud, nothing leaves your network.
 
-![PlantPulse Dashboard](docs/screenshot.png)
+![PlantPulse](docs/screenshot.png)
 
-**[Listen Live](https://plantpulse.hook.technology)** — a hibiscus tree performing right now
+**[Listen live](https://plantpulse.hook.technology)**: a hibiscus performs around the clock. That site runs the project's SuperCollider engine; this repository is the free browser port of the same musical decisions, for your own plant. (The old Tone.js preset engine this repo once held is [release v1.0.0](https://github.com/hook-365/plantpulse-tonejs/releases/tag/v1.0.0).)
 
----
+## What you're hearing
 
-## What You're Hearing
+Plants produce microvolt-level electrical fluctuations across their leaves: ion transport, light response, touch, temperature, and processes nobody fully understands. PlantPulse reads them at 16-bit resolution and hears them as:
 
-Plants produce microvolt-level electrical fluctuations across their leaves — tiny signals caused by ion transport, light response, touch, temperature changes, and processes we don't fully understand yet. PlantPulse reads these signals at 16-bit resolution and uses them as the DNA for a full generative music system.
+- **energy**, how lively the plant is, as a **rank against its own trailing day**, so a quiet plant and a lively plant both get a full range, and the median is 0.5 by construction;
+- **stability**, how settled the recent signal is;
+- **center**, where the signal sits in its ten-minute range;
+- **tilt**, which way it is heading;
+- **weather**, the day's character: this hour ranked against the day's other hours.
 
-The plant doesn't just modulate a filter or pick random notes. It:
+A composer plays from those. The harmony is a walk over tonic, subdominant and dominant, with the plant leaning it home or away, chords coloured per dwell, voices led by nearest motion. Every song draws its players fresh, like a station that never books the same combo twice. Nothing is scripted and nothing is stored: every phrase is generated, remembered for the song, developed (never verbatim), and the song's hook is frozen from its own opening and stated again at the chorus.
 
-- **Seeds the musical motif** — a short melodic theme sampled from the plant's state at that moment, becoming the hook for an entire "track"
-- **Conducts the ensemble** — active plant promotes fills and arps, quiet plant lets the lead play solo
-- **Triggers section changes** — a spike in activity can push the music from verse to chorus
-- **Crossfades between instruments** — calm plant gets a warm mellow lead, active plant gets a brighter, more energized voice layered on top
-- **Writes new songs over time** — every 5-10 minutes, the motif regenerates from the plant's current state, the key modulates, and a genuinely new track begins
+### The rooms
 
-The result is music that evolves over hours. Leave it running and come back — it won't sound the same. Your plant is composing.
+- **drift**: a slow breathing drone. Held voices cross-fade through the harmony walk, a sub sits under the root, and the plant's energy opens the timbre while the chord rings; centre and tilt sweep its vowel. Seamless across songs. It needs no samples: something to sleep to.
+- **piano**: a pianist drawn every song (touch, rhythm feel, register, how they develop an idea, the left-hand figure) with two hands on a sampled grand, and about half the time a cellist who holds an inner voice, answers the piano's phrases, and may sing one section of the song. Verses, choruses, breakdowns; a real ritardando at the double bar.
 
-## The Signal Chain
+The full decision surface, every choice with its plant input and its randomness, is in [`docs/COMPOSER.md`](docs/COMPOSER.md).
+
+## The signal chain
 
 ```
-Plant leaf ──→ Alligator clips ──→ ADS1115 16-bit ADC (±256mV, 4 samples/sec)
+Plant leaf ──→ Alligator clips ──→ ADS1115 16-bit ADC (±256 mV, 4 samples/sec)
                                         │ I2C
                                    ESP32-WROOM-32D
                                         │ WiFi + MQTT
                                    Mosquitto broker
                                         │
-                                   Flask server (SSE proxy, no credentials exposed)
+                                   Flask server (MQTT → SSE, serves the page and your samples)
                                         │ Server-Sent Events
-                                   Browser
-                                        │
-                                   Generative Synth Engine (Tone.js / Web Audio API)
+                                   Browser: the composer, plain Web Audio
 ```
 
-**~$15 in hardware. No cloud services. Runs entirely on your local network.**
-
-## The Synth Engine
-
-This isn't a simple "voltage → pitch" mapper. PlantPulse is a full generative music system with:
-
-### Per-Instrument Signal Chains
-Every preset has **6 independent instruments** (lead, lead_active, pad, bass, arp, fill), each with its own synth type, filter, envelope, distortion, and panner. The lead and lead_active crossfade based on plant activity — the plant literally chooses which instrument is playing.
-
-### 5 Drum Kits + 8 Drummers
-Each preset gets a unique **drum kit** (LinnDrum, chiptune NES, jazz brushes, bitcrushed lo-fi, tight modern) played by a unique **drummer personality** (The Machine, The Kid, The Cat, The Professor, The Preacher, The Rocker, The Robot, The Ghost) — each with its own swing, ghost note probability, variation tendency, and fill style.
-
-### Motif DNA System
-At each track start, the plant's current electrical state is sampled to generate a **motif** — a short melodic theme that becomes the riff, the bass line hook, and the phrase generator's reference. Motif variations (transposed, inverted, fragmented, ornamented) rotate per section. The bass riff plays the same motif pitches on a genre-specific rhythm template, creating a unified musical identity where melody and bass are siblings of the same plant-seeded idea.
-
-### Song Structure
-Presets define full **arrangements** — intro, verse, chorus, breakdown sections with per-section voice levels, drum styles, motif variations, octave shifts, and entry accents. Breakdowns use "cut" drops (sudden silence) at varied lengths (1-4 bars) per preset for genre-appropriate tension/release.
-
-### Track Lifecycle
-After 5-12 minutes (preset-dependent), the current "track" ends: master fades down, 2 bars of silence, then a **new motif regenerates from the plant's current state** and the **key modulates** through a hand-picked pool of related keys. The music keeps flowing like tracks on an album — same preset vibe, genuinely different composition.
-
-### Plant-Driven Mixing
-The plant acts as a **real-time conductor**: active plant promotes fills and arps while dimming the lead, quiet plant returns to sparse solo feel. This happens continuously, not just at section boundaries. Combined with the dual-lead crossfade, the plant controls both *who plays* and *how they sound*.
-
-## 14 Presets, Each a Different Band
-
-| Preset | Vibe | Key Feature |
-|--------|------|-------------|
-| Default | Balanced generative | Good starting point |
-| Bells | Sparkling, percussive | High-res resonant pings |
-| Pad | Massive detuned wash | Eno-style ambient |
-| Pluck | Sharp bouncy arps | Fast scalar runs |
-| Wind | Breathy, filter-heavy | LFO-driven movement |
-| Glass | Inharmonic, resonant | Near-self-oscillation drips |
-| Ethereal | Cathedral reverb | 20s decay, vast space |
-| Organic | Warm, gritty, earthy | Gospel pocket drumming |
-| Synth Wave | 80s analog drive | LinnDrum + fat saws |
-| Crystal Cave | Sparse, huge echoes | Dripping cave reverb |
-| Midnight | Dark, minimal | Deep sub foundation |
-| Circuit | Chiptune 8-bit | NES noise channel drums |
-| Piano | FM piano + brushes | DX7-style hammer attack |
-| Lo-Fi | Chill dusty beats | Dilla ghost notes + vinyl crackle |
-
-Each preset has its own drummer, drum kit, bass riff template, instrument signal chains, arrangement structure, key rotation pool, and track duration. No two presets share the same musical identity.
+**Dumb sensor, secure server, smart client.** The ESP32 publishes raw volts and nothing else. The server holds the broker credentials and relays the readings. Every musical decision, and every note, happens in your browser. The page makes no third-party requests.
 
 ## Hardware
-
-### What You Need
 
 | Part | Description | Cost |
 |------|-------------|------|
@@ -95,10 +51,6 @@ Each preset has its own drummer, drum kit, bass riff template, instrument signal
 | ADS1115 | 16-bit I2C ADC with PGA | ~$3 |
 | Soft alligator clips | Electrode clips for leaves | ~$2 |
 | Breadboard + jumpers | Prototyping | ~$5 |
-
-**Total: ~$15**
-
-### Wiring
 
 ```
 ADS1115          ESP32
@@ -112,44 +64,48 @@ A0 ───────────── Alligator clip 1 (leaf)
 A1 ───────────── Alligator clip 2 (leaf)
 ```
 
-The ADS1115 reads the **differential voltage** between the two clips at ±256mV gain — sensitive enough to pick up the microvolt-level signals plants produce.
+The ADS1115 reads the differential voltage between the two clips at ±256 mV gain, sensitive enough for the plant's microvolt signals. A second chip is optional (a commented block in `plantpulse.yaml`); the composer listens to the first pair.
 
-### Multi-Channel Support
+## Software setup
 
-PlantPulse supports up to **3 differential channels** across 2 ADS1115 chips (6 electrodes total). The patch bay lets you route any channel to any synth parameter — each electrode pair can drive a different instrument's filter.
-
-## Software Setup
-
-### Prerequisites
-- [ESPHome](https://esphome.io/) for flashing the ESP32
-- An MQTT broker ([Mosquitto](https://mosquitto.org/))
-- Docker for the server
+You need [ESPHome](https://esphome.io/) to flash the ESP32, Docker for the server, and `ffmpeg` on the host if you want the piano room's samples.
 
 ### 1. Flash the ESP32
 
 ```bash
-cp secrets.yaml.example secrets.yaml
-# Edit secrets.yaml with your WiFi and MQTT credentials
+cp secrets.yaml.example secrets.yaml   # WiFi, OTA password, the broker's address and credentials
 esphome run plantpulse.yaml
 ```
 
-### 2. Deploy the Server
+### 2. Run the server
 
 ```bash
-cat > .env << EOF
-MQTT_USER=plantpulse
-MQTT_PASS=your-mqtt-password
-EOF
-
-docker compose up -d
-# Dashboard available on port 8286
+cp .env.example .env                   # MQTT_HOST / MQTT_USER / MQTT_PASS
+docker compose up -d                   # with a broker you already run (MQTT_HOST in .env), or:
+tools/broker-password                  # writes the bundled broker's password file from .env
+docker compose --profile broker up -d  # ...and runs it: the ESP32 connects to this machine on 1883
 ```
 
-### 3. Open the Dashboard
+No plant yet? `docker compose --profile demo up` runs a fake plant on the bundled broker so you can hear the rooms.
 
-Navigate to `http://your-server:8286`, click **Connect**, then **Play**. The plant starts performing immediately.
+### 3. The piano room's samples
 
-For public access behind nginx, enable SSE support:
+The **drift** room plays with nothing to download. The **piano** room needs two free libraries that are fetched from their publishers rather than shipped here:
+
+- **Salamander Grand Piano V3** by Alexander Holm, CC BY 3.0
+- **Philharmonia Orchestra cello**, free for any use, whose terms say the samples must not be made available "as is": so they never appear in this repository
+
+```bash
+tools/fetch-samples            # ~580 MB download into ./samples (needs ffmpeg); --hifi for the 48 kHz master
+```
+
+It builds the three web packs the page reads (`samples/web/`), which `docker compose` mounts read-only; no restart needed. Re-run it safely any time. If you publish audio made with the piano room, credit Alexander Holm (CC BY 3.0) and the Philharmonia Orchestra; details in [`NOTICE.md`](NOTICE.md).
+
+### 4. Open the page
+
+`http://your-server:8286`. Pick a room, press play. The meters show the four signals and how far the ranks have warmed (they need two hours of the plant's day to leave the fixed ceiling, four to be fully its own; the page remembers the day across reloads). The line under the deck says what the band is doing: the bar, the key, the chord path, the section, the pianist's and cellist's words. `rec` saves what you hear as a `.webm`; `save take` saves the song's note log, the file `tools/take-review` grades.
+
+Behind a reverse proxy, the stream needs buffering off:
 
 ```nginx
 location /api/stream {
@@ -161,27 +117,14 @@ location /api/stream {
 }
 ```
 
-## Architecture
+## Receipts
 
-**Dumb sensor, secure server, smart client.**
+`tools/gate` is the whole verdict in one exit code: the mood schema closed against the data, every key read by its module and named in the contract, the raw plant features confined to the energy model, no third-party requests from the page, and `node --test` over a virtual day (the composer with a synthetic plant and a fake audio layer: energy's median lands at 0.5 after a day, the walk stays diatonic, drift never fires a piano note, the piano stays in its window, the cellist appears about half the time). `tools/take-review energy | harmony | melody | cello` prints the live project's review numbers from the page's own takes.
 
-- **ESP32** reads the ADC, publishes raw voltage over MQTT. Nothing else.
-- **Flask server** subscribes to MQTT (credentials server-side only), relays to browsers via SSE, serves the UI, provides a history API via TimescaleDB.
-- **Browser** does all synthesis, visualization, and interaction using Tone.js and the Web Audio API.
+## How this relates to the main project
 
-The entire synth engine runs client-side. The server is a thin MQTT→SSE bridge. Your plant data never leaves your network unless you choose to expose the dashboard.
-
-## Features
-
-- Real-time signal visualization with Chart.js (raw + smoothed traces, activity level, oscilloscope)
-- 14 preset buttons with instant switching and full state persistence to localStorage
-- Modulation patch bay with drag-and-drop cable routing (18 sources × 38 targets)
-- XY morph pad for manual parameter control
-- WebMIDI output to external DAWs and hardware synths
-- Audio recording to WebM/Opus with direct download
-- Historical data viewer with TimescaleDB (time-bucketed aggregates)
-- Mobile-optimized frequency design (all instruments have harmonics above 200Hz)
+The live site is a private build: the same composer in SuperCollider, three rooms (the third, lofi, uses licensed drum kits and sample packs and stays stream-only), Icecast streams, cast, recordings with posters, accounts. This repository is the browser port of the drift and piano rooms, kept in step with the composer's decision spec, free to run on your own plant. The composer's data (`static/composer/`) is copied from the live project by `tools/sync-composer-data`.
 
 ## License
 
-MIT
+MIT (see `LICENSE`). Third-party notices and the sample credits in `NOTICE.md`. Built by [Anthony Hook](https://github.com/hook-365).

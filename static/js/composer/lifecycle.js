@@ -140,6 +140,22 @@ export function install(C) {
     weather_at_start: C.sig.weather ?? 0.5,
   });
 
+  //! the stop-time sidecar fields tools/take-review reads: the chord path,
+  //! the phrase receipts, the players' draws
+  C.takeExtra = () => ({
+    chord_path: (C.chordPath ?? []).join(" "),
+    phr_total: C.phraseStats?.total ?? 0, phr_hook: C.phraseStats?.hook ?? 0, phr_recall: C.phraseStats?.recall ?? 0,
+    phr_lick: C.phraseStats?.lick ?? 0, phr_free: C.phraseStats?.free ?? 0, phr_motif: C.phraseStats?.motif ?? 0,
+    motif_len: C.chorusCell?.ivs ? C.chorusCell.ivs.length + 1 : 0,
+    rh_synth: C.touchNow?.rhSynth ?? C.mood.rightHandSynth ?? "",
+    pianist: C.touchNow?.words ?? "",
+    strings: C.stringsNow?.on ? 1 : 0,
+    strings_role: C.stringsNow?.on ? C.stringsNow.role : "none",
+    cellist: C.stringsNow?.on ? C.stringsNow.words : "",
+    cello_voice: C.stringsNow?.on && C.stringsNow.voice ? C.stringsNow.voiceSec : "none",
+    root_name: ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][((C.rootMidi ?? 60) % 12 + 12) % 12] + String(Math.floor((C.rootMidi ?? 60) / 12) - 1),
+  });
+
   C.lifecycleBody = function* () {
     for (;;) {
       //! Weather nudges tempo at track boundaries only; this line is also the

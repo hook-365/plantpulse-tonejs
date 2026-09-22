@@ -79,6 +79,8 @@ export function install(C, { ringSize = 4096, onTake = null } = {}) {
     if (!take) return null;
     C.noteLog = null;
     take.meta.duration_s = Math.round((C.clock.now() - take.opened) * 10) / 10;
+    //! the sidecar's stop-time fields (what the live engine's ~recWriteSidecar adds)
+    Object.assign(take.meta, C.takeExtra?.() ?? {});
     onTake?.(take);
     return take;
   };

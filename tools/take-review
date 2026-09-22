@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""take-review: the live project's review measurements, as a tool, on the
+browser composer's takes.
+
+Reads recordings/takes.jsonl (the take meta the page posts) and
+recordings/spool/*.notes.jsonl (the note logs) and prints, per room, the
+numbers the live project judges its rooms by. Pure receipts: nothing in the
+engine reads this. The lofi commands (swing, drums) stay for parity with
+the live tool and print "no lofi takes" here.
+
+usage: tools/take-review energy   [SINCE]   # energy/stability/weather at track start
+       tools/take-review register [SINCE]   # right-hand register, per section
+       tools/take-review swing    [SINCE]   # lofi hats/snare placement, breakdown share
+       tools/take-review harmony  [SINCE]   # chord-path transitions, dwells, colours
+       tools/take-review cello    [SINCE]   # the cello vs the piano: register, bows, rests, chord fit, answer timing (Track C, 2026-08-26)
+       tools/take-review melody   [SINCE]   # phrase receipts split by right-hand instrument, comp instrument and kit
+       tools/take-review drums    [SINCE]   # the skeleton census: backbeat slots, hat styles, backbeat voice, kick sets (2026-08-27)
+SINCE is a take-name prefix, e.g. 2026-08-25T16 (default: the last 60 takes per room).
+"""
+import glob, json, os, re, sys, statistics as st, collections
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'recordings')
+ROOMS = ('piano', 'drift', 'lofi')
+TOK = re.compile(r'^(\d)([TSD])(\d+)(\+\w+)?(>\w+)?$')
+
+def pct(xs, p):
+    xs = sorted(xs); return xs[min(len(xs) - 1, int(p * len(xs)))] if xs else None
+
+def takes(since):
+    rows = [json.loads(l) for l in open(os.path.join(ROOT, 'takes.jsonl')) if l.strip()]
+    out = {}
+    for r in ROOMS:
+        sel = [x for x in rows if x.get('preset_name') == r]
+        out[r] = [x for x in sel if x.get('wav_filename', '') >= since] if since else sel[-60:]
+    return out
+
+def logs(since):
+    files = sorted(set(glob.glob(os.path.join(ROOT, 'spool', '*.notes.jsonl')) + glob.glob(os.path.join(ROOT, 'buffer', '*.notes.jsonl'))), key=os.path.basename)
+    seen, out = set(), {r: [] for r in ROOMS}
+    for f in files:
+        b = os.path.basename(f)
+        if b in seen: continue
+        seen.add(b)
+        room = b.split('__')[1]
+        if room in out and (b >= since if since else True):
+            out[room].append(f)
+    if not since:
+        out = {r: fs[-60:] for r, fs in out.items()}
+    return out
+
+def load(f):
+    rows = []
+    for l in open(f):
+        try: rows.append(json.loads(l))
+        except Exception: pass
+    return rows
+
+def energy(since):
+    for r, sel in takes(since).items():
+        if not sel: print(f"{r:6s} no takes"); continue
+        e = [x['sig_energy_at_start'] for x in sel]; s = [x['sig_stability_at_start'] for x in sel]; w = [x['weather_at_start'] for x in sel]
+        print(f"{r:6s} n={len(sel):4d} energy p10/50/90 {pct(e,.1):.2f}/{pct(e,.5):.2f}/{pct(e,.9):.2f}  stability {pct(s,.5):.2f}  "
+              f"weather p10/50/90 {pct(w,.1):.2f}/{pct(w,.5):.2f}/{pct(w,.9):.2f}  frac(w==0.5) {sum(abs(x-0.5)<1e-6 for x in w)/len(w):.2f}")
+    print("pass: after 24h energy med 0.40-0.55, weather med 0.45-0.55, frac(w==0.5) < 0.1")
+
+def register(since):
+    for r, fs in logs(since).items():
+        rh, bysec = [], collections.defaultdict(list)
+        for f in fs:
+            rows = load(f); marks = [x for x in rows if x.get('mark') == 'section']
+            def sec_at(b):
+                s = None
+                for m in marks:
+                    if m['b'] <= b: s = m['t']
+                return s
+            for x in rows:
+                if x.get('r') == 'rh': rh.append(x['m']); bysec[sec_at(x['b'])].append(x['m'])
+        if not rh: print(f"{r:6s} no rh"); continue
+        print(f"{r:6s} takes={len(fs):3d} RH p5/50/95 {pct(rh,.05):.0f}/{pct(rh,.5):.0f}/{pct(rh,.95):.0f}  >=C6 {sum(m>=84 for m in rh)/len(rh):.0%}  by section "
+              + ' '.join(f"{k}:{pct(v,.5):.0f}" for k, v in bysec.items()))
+    print("pass: p50 inside rhWindow; lofi >=C6 < 20%; piano chorus median <= 86")
+
+def swing(since):
+    fs = logs(since)['lofi']
+    h8, h16, sn, hats, bars, bd_bars, bd_hat_bars, lock_hits, bass_n, secs_all, secs_bd = [], [], [], 0, 0, 0, 0, 0, 0, 0, 0
+    for f in fs:
+        rows = load(f); hdr = next((x for x in rows if 'header' in x), None)
+        marks = [(x['b'], x['t']) for x in rows if x.get('mark') == 'section']
+        kicks = [x['b'] for x in rows if x.get('drum') == 'kick']
+        spans = [(b, (marks[i+1][0] if i+1 < len(marks) else 1e9), t) for i, (b, t) in enumerate(marks)]
+        for x in rows:
+            if 'drum' in x:
+                fr = x['b'] % 1
+                if x['drum'] == 'hat':
+                    hats += 1
+                    if abs(fr - 0.5) < 0.12: h8.append(fr)
+                    elif abs(fr - 0.25) < 0.1 or abs(fr - 0.75) < 0.1: h16.append(fr % 0.5)
+                elif x['drum'] == 'snare' and (abs(x['b'] % 4 - 1) < 0.25 or abs(x['b'] % 4 - 3) < 0.25): sn.append(fr)
+            elif x.get('r') == 'bass':
+                bass_n += 1
+                if any(abs(x['b'] - k) < 0.03 for k in kicks): lock_hits += 1
+        last = max((x['b'] for x in rows if 'b' in x), default=0); bars += last / 4
+        secs_all += len(marks); secs_bd += sum(1 for _, t in marks if t == 'breakdown')
+        for b0, b1, t in spans:
+            if t == 'breakdown':
+                n = (min(b1, last) - b0) / 4; bd_bars += n
+                if any(x.get('drum') == 'hat' and b0 <= x['b'] < b1 for x in rows): bd_hat_bars += n
+    if not fs: print("no lofi takes"); return
+    print(f"lofi takes={len(fs)} hat8 med {st.median(h8) if h8 else float('nan'):.3f} (n={len(h8)})  hat16 med {st.median(h16) if h16 else float('nan'):.3f} (n={len(h16)})  "
+          f"snare frac med {st.median(sn) if sn else float('nan'):.3f}  hats/bar {hats/max(bars,1):.1f}  bass-kick lock {lock_hits/max(bass_n,1):.2f}  "
+          f"breakdown {secs_bd}/{secs_all} sections ({secs_bd/max(secs_all,1):.0%}), {bd_bars:.0f}/{bars:.0f} bars ({bd_bars/max(bars,1):.0%}) with hats {bd_hat_bars/max(bd_bars,1):.0%}")
+    print("pass: hat8 0.56-0.58, hat16 0.29-0.31, snare 0.05-0.09 (2-and-4 feels only), lock >> 0.02, breakdown 15-25% of SECTIONS (8-13% of bars: a breakdown is half a section since v3.6-D) with hats ~100%")
+
+def harmony(since):
+    for r, sel in takes(since).items():
+        trans, deg, bars, col = collections.Counter(), collections.Counter(), collections.Counter(), collections.Counter()
+        for x in sel:
+            toks = [TOK.match(t) for t in x.get('chord_path', '').split()]
+            toks = [m for m in toks if m]
+            for a, b in zip(toks, toks[1:]): trans[f"{a.group(1)}{a.group(2)}>{b.group(1)}{b.group(2)}"] += 1
+            for m in toks:
+                deg[m.group(1)] += 1; bars[int(m.group(3))] += 1; col[(m.group(2), (m.group(4) or '') + (m.group(5) or ''))] += 1
+        n = sum(deg.values()) or 1
+        print(f"{r:6s} takes={len(sel):3d} chords={n}  degrees " + ' '.join(f"{d}:{c/n:.0%}" for d, c in sorted(deg.items()))
+              + f"  dwell {dict(sorted(bars.items()))}")
+        print(f"       top transitions {trans.most_common(6)}")
+        print(f"       colours " + ' '.join(f"{f}{c or '(triad)'}:{k}" for (f, c), k in col.most_common(10)))
+    print("pass: transitions follow each mood's funcTrans; dwells within dwellPool; colours ~ chordColor rows")
+
+SCALES = {'major': [0,2,4,5,7,9,11], 'minor': [0,2,3,5,7,8,10], 'dorian': [0,2,3,5,7,9,10],
+          'mixolydian': [0,2,4,5,7,9,10], 'lydian': [0,2,4,6,7,9,11], 'phrygian': [0,1,3,5,7,8,10],
+          'pentatonic': [0,2,4,7,9], 'aeolian': [0,2,3,5,7,8,10]}
+
+def chord_by_bar(x):
+    """bar index -> set of pitch classes, from the sidecar's chord_path (tokens
+    <deg><func><bars>[+colour]) laid end to end from bar 0 in the take's scale"""
+    sc = SCALES.get(x.get('scale', ''), SCALES['major']); root = int(x.get('root_midi', 60)) % 12
+    out, bar = {}, 0
+    for tok in x.get('chord_path', '').split():
+        m = TOK.match(tok)
+        if not m: continue
+        d, n = int(m.group(1)), int(m.group(3)); ext = m.group(4) or ''
+        degs = [d, d + 2, d + 4] + ([d + 6] if '7' in ext else []) + ([d + 1] if 'sus2' in ext else []) + ([d + 3] if 'sus4' in ext else [])
+        pcs = {(root + sc[k % len(sc)] + 12 * (k // len(sc))) % 12 for k in degs}
+        for b in range(bar, bar + n): out[b] = pcs
+        bar += n
+    return out
+
+def cello(since):
+    """Track C receipts: the cello read from the piano room's note logs"""
+    fs = logs(since)['piano']; sides = {x['wav_filename'].replace('.wav', ''): x for x in takes(since)['piano']}
+    gaps, bows, long_bows, rest_share, fit_w, fit_n, lat, answered, through, marked_takes = [], [], 0, [], 0.0, 0.0, [], 0, [], 0
+    roles, voices, desks, n_with = collections.Counter(), collections.Counter(), collections.Counter(), 0
+    per_sec = collections.defaultdict(lambda: [0.0, 0.0])   # section -> [cello sounding beats, section beats]
+    for f in fs:
+        rows = load(f); cel = [x for x in rows if x.get('r') == 'cello']; rh = [x for x in rows if x.get('r') == 'rh']
+        if not cel or not rh: continue
+        n_with += 1
+        name = os.path.basename(f).replace('.notes.jsonl', ''); side = sides.get(name, {})
+        roles[side.get('strings_role', '?')] += 1; voices[side.get('cello_voice', '?') != 'none'] += 1
+        desks['section' if 'section' in (side.get('cellist') or '') else 'solo'] += 1
+        cm = st.median(x['m'] for x in cel); rm = st.median(x['m'] for x in rh); gaps.append(rm - cm)
+        # through the piano: cello notes above the right hand's median of the same 8 beats
+        for c in cel:
+            near = [x['m'] for x in rh if abs(x['b'] - c['b']) <= 4]
+            if near: through.append(c['m'] > st.median(near))
+        for c in cel:
+            bows.append(c['d']); long_bows += c['d'] > 4
+        # rests: beats with no cello sounding, per section
+        marks = sorted([(x['b'], x['t']) for x in rows if x.get('mark') == 'section'] + [(0.0, 'intro')])
+        last = max(x['b'] + x['d'] for x in cel)
+        for i, (b0, sec) in enumerate(marks):
+            b1 = marks[i + 1][0] if i + 1 < len(marks) else last
+            if b1 <= b0: continue
+            snd = 0.0
+            for c in cel:
+                lo, hi = max(c['b'], b0), min(c['b'] + c['d'], b1)
+                if hi > lo: snd += hi - lo
+            per_sec[sec][0] += min(snd, b1 - b0); per_sec[sec][1] += b1 - b0
+        # chord-tone fit, weighted by duration: from the note log's chord marks
+        # (2026-08-27, exact) when the take has them, else the sidecar's chord
+        # path (uncalibrated: the left hand's own bass notes read 56% through it)
+        cmarks = sorted([(x['b'], {int(float(v)) % 12 for v in x['t'].split(',') if v.strip()}) for x in rows if x.get('mark') == 'chord'])
+        if cmarks:
+            marked_takes += 1
+            def pcs_at(b):
+                cur = None
+                for mb, pcs in cmarks:
+                    if mb <= b + 0.05: cur = pcs
+                    else: break
+                return cur
+            for c in cel:
+                pcs = pcs_at(c['b'])
+                if pcs: fit_w += c['d'] * (int(round(c['m'])) % 12 in pcs); fit_n += c['d']
+        else:
+            cb = chord_by_bar(side) if side else {}
+            for c in cel:
+                pcs = cb.get(int(c['b'] // 4))
+                if pcs: fit_w += c['d'] * (int(round(c['m'])) % 12 in pcs); fit_n += c['d']
+        # answer timing: a cello phrase starts after >= 2 beats of cello silence; how
+        # long after the last right-hand note ended, and how often within a beat
+        cel_s = sorted(cel, key=lambda x: x['b']); rh_end = sorted(x['b'] + x['d'] for x in rh)
+        prev_end = -9
+        for c in cel_s:
+            if c['b'] - prev_end >= 2:
+                before = [e for e in rh_end if e <= c['b'] + 0.05]
+                if before: dlat = c['b'] - before[-1]; lat.append(dlat); answered += dlat <= 1.0
+            prev_end = max(prev_end, c['b'] + c['d'])
+    if not n_with: print("no piano takes with a cello in range"); return
+    print(f"piano takes with cello {n_with}/{len(fs)}  roles {dict(roles)}  voice line {voices[True]}/{n_with}  desks {dict(desks)}")
+    print(f"register: RH median minus cello median p10/50/90 {pct(gaps,.1):.0f}/{pct(gaps,.5):.0f}/{pct(gaps,.9):.0f} semitones; cello above the local RH {sum(through)/max(len(through),1):.0%} of notes")
+    print(f"bows: d p10/50/90 {pct(bows,.1):.1f}/{pct(bows,.5):.1f}/{pct(bows,.9):.1f} beats; > 4 beats {long_bows/len(bows):.0%}; n={len(bows)}")
+    print("sounding share by section: " + ' '.join(f"{k}:{v[0]/max(v[1],1e-9):.0%}" for k, v in per_sec.items()))
+    if marked_takes: print(f"chord-tone fit (duration-weighted, from the note log's chord marks; {marked_takes}/{n_with} takes carry them): {fit_w/max(fit_n,1e-9):.0%}")
+    else: print(f"chord-tone fit (duration-weighted, sidecar chord path): {fit_w/max(fit_n,1e-9):.0%}  [UNCALIBRATED: no chord marks in these takes; the sidecar path does not lay out bar for bar against the log]")
+    print(f"answers: cello phrase starts n={len(lat)}, beats after the last RH note ended p10/50/90 {pct(lat,.1):.1f}/{pct(lat,.5):.1f}/{pct(lat,.9):.1f}; within 1 beat {answered/max(len(lat),1):.0%}")
+    print("read: gap ~7-19 st with the cello under; through-the-piano < 15%; bows spread (not all 1 beat, not all held); fit > 70% (passing tones make up the rest); answers cluster inside 1-2 beats")
+
+def melody(since):
+    """phrase receipts (sidecar phr_*), split by the draws that changed 2026-08-25/26"""
+    keys = ('phr_total', 'phr_hook', 'phr_recall', 'phr_free', 'phr_motif', 'motif_len')
+    for r, sel in takes(since).items():
+        sel = [x for x in sel if x.get('phr_total') is not None]
+        if not sel: print(f"{r:6s} no takes"); continue
+        def row(label, xs):
+            print(f"  {label:34s} n={len(xs):3d}  " + '  '.join(f"{k[4:] if k.startswith('phr_') else k}={st.median(x.get(k, 0) for x in xs):.3g}" for k in keys))
+        # 2026-08-27 density per role (onsets/min from the note logs), the number that
+        # found the doubled comp after the two-hands ruling
+        dens = collections.Counter(); mins = 0.0
+        for f in logs(since)[r]:
+            rows = load(f); last = max((x['b'] for x in rows if 'b' in x), default=0); hdr = next((x for x in rows if 'header' in x), {})
+            mins += last / max(hdr.get('bpm', 76), 1)
+            for x in rows:
+                if x.get('r') in ('rh', 'lh', 'bass', 'pad', 'cello'): dens[x['r']] += 1
+                elif 'drum' in x: dens['drum'] += 1
+        print(f"{r:6s} takes={len(sel)}  onsets/min " + ' '.join(f"{k}={v/max(mins,1e-9):.0f}" for k, v in sorted(dens.items()))); row('all', sel)
+        for field in ('rh_synth', 'pad_synth', 'drum_kit'):
+            groups = collections.defaultdict(list)
+            for x in sel: groups[x.get(field) or '?'].append(x)
+            if len(groups) > 1:
+                for g, xs in sorted(groups.items(), key=lambda kv: -len(kv[1])): row(f"{field}={g}", xs)
+    print("read: a hook share that holds across instruments means the chair rule worked; free share under 20%; motif_len 8-14")
+
+def drums(since):
+    """the drummer-variety census (2026-08-27, Anthony: "a lot of similar drumming
+    patterns"): per lofi take, where the backbeat lands (16th slots; 4,12 = beats 2
+    and 4, 8 = beat 3), which hat grid the verse and chorus ride, which sample the
+    backbeat resolves to, and the verse kick set; then how many take pairs share
+    the same kick+snare signature. Sidecar draws (drum_feel / drum_hats /
+    drum_back) alongside where present."""
+    import itertools, math
+    fs = logs(since)['lofi']; sides = {x['wav_filename'].replace('.wav', ''): x for x in takes(since)['lofi']}
+    sigs, backs, hatA, hatB, bvoice, kicksets = [], collections.Counter(), collections.Counter(), collections.Counter(), collections.Counter(), collections.Counter()
+    feels, hats_d, backs_d = collections.Counter(), collections.Counter(), collections.Counter()
+    for f in fs:
+        rows = load(f); side = sides.get(os.path.basename(f).replace('.notes.jsonl', ''), {})
+        marks = sorted([(x['b'], x['t']) for x in rows if x.get('mark') == 'section'])
+        def sec(b):
+            s = 'intro'
+            for mb, t in marks:
+                if mb <= b: s = t
+            return s
+        slots = collections.defaultdict(collections.Counter); hats = collections.defaultdict(collections.Counter); bv = collections.Counter()
+        for x in rows:
+            if 'drum' not in x: continue
+            st = int(round((x['b'] % 4) * 4)) % 16; s = sec(x['b'])
+            if x['drum'] == 'kick': slots[s][st] += 1
+            elif x['drum'] in ('snare', 'clap', 'rim') and x.get('s') in ('snare', 'clap', 'rim') and s != 'breakdown':
+                bv[x.get('s')] += 1; slots['back'][st] += 1
+            elif x['drum'] in ('hat', 'hat_open', 'ride', 'shaker'): hats[s][st] += 1
+        if not slots: continue
+        nA = max(1, slots['A'].get(0, 1))
+        ks = tuple(sorted(st for st, c in slots['A'].items() if c >= 0.4 * nA))
+        bmax = max(slots['back'].values()) if slots['back'] else 1
+        sn = tuple(sorted(st for st, c in slots['back'].items() if c >= 0.5 * bmax))
+        kicksets[ks] += 1; backs[sn] += 1
+        for s, tgt in (('A', hatA), ('B', hatB)):
+            h = hats.get(s)
+            if h:
+                n0 = max(h.values()); on = tuple(sorted(st for st, c in h.items() if c >= 0.5 * n0))
+                tgt['8ths' if on == tuple(range(0, 16, 2)) else '16ths' if len(on) >= 14 else 'quarters' if on == (0, 4, 8, 12) else 'other'] += 1
+        bvoice[max(bv, key=bv.get) if bv else 'none'] += 1
+        feels[side.get('drum_feel', '?')] += 1; hats_d[side.get('drum_hats', '?')] += 1; backs_d[side.get('drum_back', '?')] += 1
+        sigs.append((ks, sn))
+    if not sigs: print('no lofi takes with drums in range'); return
+    same = sum(1 for a, b in itertools.combinations(sigs, 2) if a == b); tot = max(1, math.comb(len(sigs), 2))
+    print(f"lofi takes={len(sigs)}")
+    print(f"backbeat slots (4,12 = beats 2+4; 8 = beat 3): {dict(backs.most_common())}")
+    print(f"verse hats {dict(hatA)}  chorus hats {dict(hatB)}")
+    print(f"backbeat sample {dict(bvoice)}")
+    print(f"drawn (sidecar): feel {dict(feels)}  hats {dict(hats_d)}  back {dict(backs_d)}")
+    print(f"verse kick sets: {len(kicksets)} distinct; identical kick+backbeat signature in {same}/{tot} pairs ({same/tot:.0%})")
+    print("read (after 2026-08-27): backbeat slots split across (4,12) / (8,) / (12,) / (4,) roughly 50/25/12/12; hats not all 8ths; backbeat sample not all snare; identical pairs < 5%. Before: (4,12) 100%, 8ths 100%, snare 80%.")
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else 'energy'
+    since = sys.argv[2] if len(sys.argv) > 2 else ''
+    {'energy': energy, 'register': register, 'swing': swing, 'harmony': harmony, 'cello': cello, 'melody': melody, 'drums': drums}[cmd](since)

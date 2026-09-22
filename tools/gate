@@ -12,6 +12,7 @@ checks, in order:
   json      every tracked *.json parses
   composer  the composer keeps its laws: static/composer/moods.json conforms
             to the closed mood schema (exactly the free rooms: drift, piano);
+            every schema key is named in docs/COMPOSER.md (the contract);
             every schema key has its named consumer module and every consumed
             key is in the schema (the sponsoring-customer law, with the
             schema's composer/X.scd paths mapped to static/js/composer/X.js);
@@ -195,6 +196,16 @@ def check_composer():
         for k in set(re.findall(r"\bmood\??\.(\w+)", src)):
             if k not in schema:
                 fail("composer", f"{f} reads mood.{k}, which is not in the schema")
+
+    # the doc is charged: every schema key is named in docs/COMPOSER.md
+    doc_path = os.path.join(REPO, "docs", "COMPOSER.md")
+    if os.path.exists(doc_path):
+        doc = open(doc_path, errors="replace").read()
+        undocumented = [k for k in schema if f"`{k}`" not in doc]
+        if undocumented:
+            fail("composer", "docs/COMPOSER.md does not name these schema keys: " + ", ".join(undocumented))
+    else:
+        print("  composer: WARNING no docs/COMPOSER.md (the contract) yet")
 
     # raw-feature isolation, name-check ban, comment law
     for f, src in js.items():
