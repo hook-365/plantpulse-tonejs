@@ -1,0 +1,11 @@
+{
+  "name": "plantpulse",
+  "private": true,
+  "type": "module",
+  "description": "PlantPulse: a living plant conducting a browser composer",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "gate": "python3 tools/gate"
+  },
+  "engines": { "node": ">=20" }
+}

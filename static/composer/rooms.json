@@ -1,0 +1,18 @@
+{
+  "description": "The rooms the page offers (tools/sync-composer-data from the live project's rooms.json). A room is a mood; lofi stays on the live stream only (licensed packs).",
+  "default": "drift",
+  "rooms": [
+    {
+      "name": "piano",
+      "mood": "piano",
+      "label": "piano",
+      "blurb": "solo piano, sometimes a cello"
+    },
+    {
+      "name": "drift",
+      "mood": "drift",
+      "label": "drift",
+      "blurb": "a slow breathing drone, no piano at all"
+    }
+  ]
+}

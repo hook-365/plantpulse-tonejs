@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""sync-composer-data: bring the composer's data files over from the live
+PlantPulse project (the source of truth for the rooms' musical tables) into
+static/composer/, keeping only what the free release plays.
+
+    tools/sync-composer-data [PATH-TO-LIVE-REPO]   # default ../plantpulse
+
+- moods.json: the drift and piano moods only. lofi's kits and Loopcloud
+  voices are licensed packs (NOTICE.md), so its mood is not offered.
+- mood-schema.json: verbatim (the closed schema tools/gate checks; its
+  `consumer` paths name .scd files, which the gate maps to static/js/).
+- rooms.json: name, mood, label, blurb per room; the stream-only fields
+  (host, oscPort, mounts, art, image) are dropped, and so is lofi.
+"""
+import json, os, sys
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(HERE), "plantpulse")
+OUT = os.path.join(HERE, "static", "composer")
+KEEP = ("drift", "piano")
+
+
+def main():
+    cdir = os.path.join(SRC, "composer")
+    if not os.path.isdir(cdir):
+        sys.exit(f"no composer/ under {SRC} (pass the live repo's path)")
+    os.makedirs(OUT, exist_ok=True)
+
+    moods = json.load(open(os.path.join(cdir, "moods.json")))
+    moods["moods"] = [m for m in moods["moods"] if m["name"] in KEEP]
+    moods["description"] = ("The free release's rooms, drift and piano, copied from the live project's "
+                            "composer/moods.json by tools/sync-composer-data. Every key is read by the "
+                            "composer (static/js/composer/) and closed by mood-schema.json (tools/gate).")
+    json.dump(moods, open(os.path.join(OUT, "moods.json"), "w"), indent=2)
+    json.dump(json.load(open(os.path.join(cdir, "mood-schema.json"))), open(os.path.join(OUT, "mood-schema.json"), "w"), indent=2)
+
+    rooms = json.load(open(os.path.join(cdir, "rooms.json")))
+    out = {"description": "The rooms the page offers (tools/sync-composer-data from the live project's rooms.json). "
+                          "A room is a mood; lofi stays on the live stream only (licensed packs).",
+           "default": "drift",
+           "rooms": [{k: r[k] for k in ("name", "mood", "label", "blurb")} for r in rooms["rooms"] if r["name"] in KEEP]}
+    json.dump(out, open(os.path.join(OUT, "rooms.json"), "w"), indent=2)
+    print(f"synced {[m['name'] for m in moods['moods']]} moods, {len(out['rooms'])} rooms, schema {len(json.load(open(os.path.join(OUT, 'mood-schema.json')))['keys'])} keys -> {OUT}")
+
+
+if __name__ == "__main__":
+    main()

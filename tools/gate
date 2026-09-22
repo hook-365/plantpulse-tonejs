@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""gate: the whole verdict in one exit code.
+
+A development tool, not part of the running app. Runs every check the repo
+owns, cheapest first, and exits nonzero at the first failure. Nothing lands
+without this exiting 0; CI (.github/workflows/ci.yml) runs the same verdict.
+
+usage: tools/gate [--repo PATH]
+
+checks, in order:
+  compile   py_compile every tracked *.py and tools/* script
+  json      every tracked *.json parses
+  composer  the composer keeps its laws: static/composer/moods.json conforms
+            to the closed mood schema (exactly the free rooms: drift, piano);
+            every schema key has its named consumer module and every consumed
+            key is in the schema (the sponsoring-customer law, with the
+            schema's composer/X.scd paths mapped to static/js/composer/X.js);
+            raw plant-feature names appear only in energy.js and signal.js;
+            no mood gets a name-check code path; comments in the composer are
+            receipts (//!) or absent
+  env       every var documented in .env.example is actually read somewhere
+  ports     every port CLAUDE.md claims exists somewhere in code or compose
+  nocdn     the page loads no third-party script (static/vendor/ only); until
+            the vendor dir exists this is a warning (the cut-over lands it)
+  tests     node --test over tests/*.test.mjs
+
+The gate judges terms, not sitters: green is green whoever did the work.
+"""
+import json
+import os
+import py_compile
+import re
+import subprocess
+import sys
+
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+if "--repo" in sys.argv:
+    REPO = os.path.realpath(sys.argv[sys.argv.index("--repo") + 1])
+
+
+def tracked(*globs):
+    out = subprocess.run(["git", "ls-files", *globs], cwd=REPO, capture_output=True, text=True)
+    files = [f for f in out.stdout.splitlines() if "node_modules/" not in f]
+    if out.returncode != 0 or not files and not globs:
+        # not a git checkout (a mirror): walk the tree instead
+        files = []
+        for root, dirs, names in os.walk(REPO):
+            dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "samples", "recordings", ".venv")]
+            for n in names:
+                files.append(os.path.relpath(os.path.join(root, n), REPO))
+    return files
+
+
+def fail(check, detail):
+    print(f"gate: RED at {check}")
+    print(detail.rstrip())
+    sys.exit(1)
+
+
+def check_compile():
+    files = tracked("*.py") + [f for f in tracked("tools/*") if os.path.isfile(os.path.join(REPO, f))
+                               and open(os.path.join(REPO, f), errors="replace").readline().startswith("#!/usr/bin/env python")]
+    for f in files:
+        try:
+            py_compile.compile(os.path.join(REPO, f), doraise=True)
+        except py_compile.PyCompileError as e:
+            fail("compile", str(e))
+    print(f"  compile: {len(files)} python files clean")
+
+
+def check_json():
+    files = tracked("*.json")
+    for f in files:
+        try:
+            json.load(open(os.path.join(REPO, f)))
+        except Exception as e:
+            fail("json", f"{f}: {e}")
+    print(f"  json: {len(files)} files parse")
+
+
+# The raw features (signal.js's snapshot). The whole point of the energy
+# model is that these reduce to sig once, in one place: any other composer
+# file naming them is re-deriving plant state.
+RAW_FEATURES = ("activity", "volatility", "signalNorm", "signal_norm", "smoothed", "trend", "jitter", "surge", "rawMv")
+FREE_ROOMS = {"drift", "piano"}
+JS_DIR = "static/js/composer"
+
+
+def js_consumer(scd_path):
+    """composer/X.scd -> static/js/composer/X.js"""
+    base = os.path.basename(scd_path)
+    return f"{JS_DIR}/{base[:-4]}.js" if base.endswith(".scd") else scd_path
+
+
+def check_composer():
+    cdir = os.path.join(REPO, "static", "composer")
+    if not os.path.isdir(cdir):
+        print("  composer: no static/composer/ — skipped (not silent)")
+        return
+    schema = json.load(open(os.path.join(cdir, "mood-schema.json")))["keys"]
+    moods = json.load(open(os.path.join(cdir, "moods.json")))["moods"]
+
+    names = [m.get("name") for m in moods]
+    if set(names) != FREE_ROOMS:
+        fail("composer", f"moods.json must hold exactly the free rooms {sorted(FREE_ROOMS)}, has {sorted(names)}")
+    for m in moods:
+        missing = sorted(set(schema) - set(m))
+        unknown = sorted(set(m) - set(schema))
+        if missing or unknown:
+            fail("composer", f"mood {m.get('name')!r}: closed schema violated\n"
+                             f"  missing: {missing or '—'}\n  unknown: {unknown or '—'}")
+        for k, spec in schema.items():
+            v = m[k]
+            legal = {"string": str, "number": (int, float), "array": list, "object": dict}
+            if not isinstance(v, legal[spec["type"]]):
+                fail("composer", f"mood {m['name']!r}.{k}: expected {spec['type']}, got {type(v).__name__}")
+            if "range" in spec and not spec["range"][0] <= v <= spec["range"][1]:
+                fail("composer", f"mood {m['name']!r}.{k}: {v} outside {spec['range']}")
+            if "enum" in spec and v not in spec["enum"]:
+                fail("composer", f"mood {m['name']!r}.{k}: {v!r} not in {spec['enum']}")
+            if "rows" in spec:
+                for r in spec["rows"]:
+                    if not isinstance(v.get(r), dict):
+                        fail("composer", f"mood {m['name']!r}.{k}: row {r!r} missing or not an object")
+                    if "rowKeys" in spec and set(v[r]) != set(spec["rowKeys"]):
+                        fail("composer", f"mood {m['name']!r}.{k}.{r}: keys {sorted(v[r])} != {sorted(spec['rowKeys'])}")
+                    if "vocab" in spec:
+                        for name, w in v[r].items():
+                            for part in str(name).split(">"):
+                                if part not in spec["vocab"]:
+                                    fail("composer", f"mood {m['name']!r}.{k}.{r}: {name!r} not in vocab")
+                            if not isinstance(w, (int, float)) or w < 0:
+                                fail("composer", f"mood {m['name']!r}.{k}.{r}.{name}: weight {w!r}")
+                        if sum(v[r].values()) <= 0:
+                            fail("composer", f"mood {m['name']!r}.{k}.{r}: weights sum to 0")
+            if "pairs" in spec:
+                lo, hi = spec["pairs"]
+                for p in v:
+                    if not (isinstance(p, list) and len(p) == 2 and isinstance(p[0], int)
+                            and lo <= p[0] <= hi and isinstance(p[1], (int, float)) and p[1] > 0):
+                        fail("composer", f"mood {m['name']!r}.{k}: bad pair {p!r} (int {lo}..{hi}, weight > 0)")
+
+    js = {f: open(os.path.join(REPO, f), errors="replace").read()
+          for f in tracked(f"{JS_DIR}/*.js")}
+
+    # sponsor audit, both directions
+    unbuilt = []
+    for k, spec in schema.items():
+        consumer = js_consumer(spec["consumer"])
+        if consumer not in js:
+            unbuilt.append(f"{k} -> {consumer}")
+        elif not re.search(rf"\b{re.escape(k)}\b", js[consumer]):
+            fail("composer", f"schema key {k!r} names {consumer} as consumer, but that file never reads it")
+    if unbuilt:
+        print(f"  composer: WARNING {len(unbuilt)} schema keys await their consumer module "
+              f"(phased build): {', '.join(sorted(set(u.split(' -> ')[1] for u in unbuilt)))}")
+    for k, spec in schema.items():
+        consumer = js_consumer(spec["consumer"])
+        if "vocab" in spec and consumer in js:
+            for word in spec["vocab"]:
+                if word not in js[consumer]:
+                    fail("composer", f"{k} vocab {word!r} never appears in {consumer}")
+    for f, src in js.items():
+        for k in set(re.findall(r"\bmood\??\.(\w+)", src)):
+            if k not in schema:
+                fail("composer", f"{f} reads mood.{k}, which is not in the schema")
+
+    # raw-feature isolation, name-check ban, comment law
+    for f, src in js.items():
+        if os.path.basename(f) != "energy.js":
+            hits = sorted({w for w in RAW_FEATURES if re.search(rf"\b{w}\b", src)})
+            if hits:
+                fail("composer", f"{f} names raw plant features ({', '.join(hits)}) — only energy.js may; read C.sig instead")
+        if re.search(r"\bmood\??\.name\s*===?", src):
+            fail("composer", f"{f} branches on mood.name — moods are data only")
+        if "/*" in src:
+            fail("composer", f"{f} has a block comment — receipts only (//!)")
+        for i, line in enumerate(src.splitlines(), 1):
+            s = line.strip()
+            if s.startswith("//") and not s.startswith("//!"):
+                fail("composer", f"{f}:{i} plain comment — prose lives in docs/COMPOSER.md; receipts are //!")
+            code = re.sub(r'"[^"]*"|\'[^\']*\'|`[^`]*`', "", line)
+            m = re.search(r"\s//(?!!)", code)
+            if m and "://" not in code:
+                fail("composer", f"{f}:{i} plain trailing comment — receipts are //!")
+    print(f"  composer: {len(moods)} moods conform to the closed schema ({len(schema)} keys); "
+          f"{len(js)} composer modules keep the laws")
+
+
+def _code_haystack():
+    text_ext = (".py", ".yml", ".yaml", ".json", ".html", ".js", ".mjs", ".sh", ".example", ".conf")
+    parts = []
+    for f in tracked():
+        if f.endswith(text_ext) or f.startswith("tools/") or f.startswith("Dockerfile"):
+            try:
+                parts.append(open(os.path.join(REPO, f), errors="replace").read())
+            except OSError:
+                pass
+    return "\n".join(parts)
+
+
+def check_env():
+    path = os.path.join(REPO, ".env.example")
+    if not os.path.exists(path):
+        print("  env: no .env.example — skipped")
+        return
+    declared = [line.split("=", 1)[0] for line in open(path)
+                if re.match(r"^[A-Z_][A-Z0-9_]*=", line)]
+    hay = _code_haystack()
+    dead = [v for v in declared if v not in hay.replace(open(path).read(), "")]
+    if dead:
+        fail("env", "documented in .env.example but never read by any code:\n  " + "\n  ".join(dead))
+    print(f"  env: {len(declared)} vars in .env.example, all read somewhere")
+
+
+def check_ports():
+    path = os.path.join(REPO, "CLAUDE.md")
+    if not os.path.exists(path):
+        print("  ports: no CLAUDE.md — skipped")
+        return
+    claimed = sorted(set(re.findall(r"(?:port |:)`?(\d{4,5})`?", open(path).read())))
+    hay = _code_haystack()
+    missing = [p for p in claimed if p not in hay]
+    if missing:
+        fail("ports", "CLAUDE.md claims ports that appear nowhere in code or compose: " + ", ".join(missing))
+    print(f"  ports: {len(claimed)} claimed in CLAUDE.md, all exist in code")
+
+
+def check_nocdn():
+    vendor = os.path.isdir(os.path.join(REPO, "static", "vendor"))
+    hits = []
+    for f in tracked("static/*.html", "static/js/*.js", "static/js/*/*.js"):
+        src = open(os.path.join(REPO, f), errors="replace").read()
+        for m in re.finditer(r"https?://(cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|[\w.-]*googleapis\.com)[^\s\"')]*", src):
+            hits.append(f"{f}: {m.group(0)}")
+    if hits and vendor:
+        fail("nocdn", "third-party script URLs in the page (vendor them into static/vendor/):\n  " + "\n  ".join(hits))
+    if hits:
+        print(f"  nocdn: WARNING {len(hits)} third-party URLs remain until the cut-over vendors them")
+    else:
+        print("  nocdn: the page makes no third-party requests")
+
+
+def check_tests():
+    tdir = os.path.join(REPO, "tests")
+    if not os.path.isdir(tdir):
+        print("  tests: no tests/ directory — skipped (not silent: add one)")
+        return
+    r = subprocess.run(["node", "--test", "tests/*.test.mjs"], cwd=REPO, capture_output=True, text=True)
+    if r.returncode != 0:
+        fail("tests", r.stdout + r.stderr)
+    m = re.search(r"^# pass (\d+)\n# fail (\d+)", r.stdout, re.M)
+    print(f"  tests: {m.group(1) if m else '?'} passed" if m else "  tests: passed")
+
+
+def main():
+    print(f"gate: reading plantpulse at {REPO}")
+    check_compile()
+    check_json()
+    check_composer()
+    check_env()
+    check_ports()
+    check_nocdn()
+    check_tests()
+    print("gate: green")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,536 @@
+{
+  "description": "Closed schema for composer/moods.json. Every mood defines exactly these keys: a missing key, an unknown key, or an out-of-range value is a gate failure (tools/gate check_sc2). Each key names its consumer file; a key whose consumer never reads it is a gate failure in the other direction. This is the sponsoring-customer law applied to config: no knob exists without a live reader.",
+  "keys": {
+    "name": {
+      "type": "string",
+      "consumer": "composer/moods.scd"
+    },
+    "bpm": {
+      "type": "number",
+      "range": [
+        40,
+        140
+      ],
+      "consumer": "composer/lifecycle.scd"
+    },
+    "scalePool": {
+      "type": "array",
+      "consumer": "composer/harmony.scd"
+    },
+    "rootPool": {
+      "type": "array",
+      "consumer": "composer/harmony.scd"
+    },
+    "trackDurRange": {
+      "type": "array",
+      "consumer": "composer/lifecycle.scd"
+    },
+    "rightHandLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "leftHandLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "padSynth": {
+      "type": "string",
+      "consumer": "composer/voices.scd"
+    },
+    "padLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "fxRoom": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/startup.scd"
+    },
+    "fxMix": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/startup.scd"
+    },
+    "fxDamp": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/startup.scd"
+    },
+    "introBars": {
+      "type": "number",
+      "range": [
+        2,
+        32
+      ],
+      "consumer": "composer/arc.scd"
+    },
+    "outroBars": {
+      "type": "number",
+      "range": [
+        2,
+        32
+      ],
+      "consumer": "composer/arc.scd"
+    },
+    "padOctave": {
+      "type": "number",
+      "range": [
+        -2,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "weatherDepth": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/energy.scd"
+    },
+    "phraseBarsMax": {
+      "type": "number",
+      "range": [
+        2,
+        8
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "duo": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "sectionBars": {
+      "type": "number",
+      "range": [
+        0,
+        16
+      ],
+      "consumer": "composer/lifecycle.scd"
+    },
+    "drumLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/drums.scd"
+    },
+    "drumSwing": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/lifecycle.scd"
+    },
+    "drumFeel": {
+      "type": "string",
+      "enum": [
+        "boombap",
+        "halftime",
+        "sparse"
+      ],
+      "consumer": "composer/drums.scd"
+    },
+    "vinylLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/drums.scd"
+    },
+    "phraseFeel": {
+      "type": "string",
+      "enum": [
+        "rubato",
+        "grid"
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "lickSeed": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "padComp": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "leftHandSynth": {
+      "type": "string",
+      "consumer": "composer/voices.scd"
+    },
+    "rightHandSynth": {
+      "type": "string",
+      "consumer": "composer/improv.scd"
+    },
+    "duoSynth": {
+      "type": "string",
+      "consumer": "composer/improv.scd"
+    },
+    "rainLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/drums.scd"
+    },
+    "kitPool": {
+      "type": "array",
+      "consumer": "composer/drums.scd"
+    },
+    "motifForm": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "hookJury": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "phraseTargets": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "periodForm": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "ritDepth": {
+      "type": "number",
+      "range": [
+        0,
+        0.5
+      ],
+      "consumer": "composer/lifecycle.scd"
+    },
+    "ritBars": {
+      "type": "number",
+      "range": [
+        1,
+        16
+      ],
+      "consumer": "composer/lifecycle.scd"
+    },
+    "stringsProb": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "stringsLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "handsChords": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "pianoCompProb": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd",
+      "doc": "per-track coin: the pianist's left hand comps the changes on the piano (hands-carry-the-harmony for the song, pad idles); 0 = never. 2026-08-18"
+    },
+    "lineRun": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "themeHold": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "regDrop": {
+      "type": "number",
+      "range": [
+        0,
+        7
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "lhFigure": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "dynWide": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/improv.scd"
+    },
+    "celloVoice": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd"
+    },
+    "rhWindow": {
+      "type": "array",
+      "consumer": "composer/improv.scd",
+      "doc": "[lo, hi] MIDI: the right hand's absolute range; every RH pitch folds by octaves into it (~rhMidi). 2026-08-25"
+    },
+    "funcTrans": {
+      "type": "object",
+      "rows": [
+        "T",
+        "S",
+        "D"
+      ],
+      "rowKeys": [
+        "T",
+        "S",
+        "D",
+        "degs"
+      ],
+      "consumer": "composer/harmony.scd",
+      "doc": "the walk's own table per mood: row = function now, T/S/D = next-function weights (renormalised by ~pp2BiasedRow), degs = [[degree 0..6, weight]] for that function. 2026-08-25"
+    },
+    "chordColor": {
+      "type": "object",
+      "rows": [
+        "T",
+        "S",
+        "D"
+      ],
+      "vocab": [
+        "triad",
+        "seventh",
+        "ninth",
+        "eleventh",
+        "sixth",
+        "sixNine",
+        "add9",
+        "sus2",
+        "sus4",
+        "open5"
+      ],
+      "consumer": "composer/harmony.scd",
+      "doc": "per-function weighted colour set, drawn once per dwell (~drawColor); a name may resolve on the dwell's last bar: \"sus4>seventh\". Diatonic: seventh is maj7/7/m7 by mode. Replaces chordExtensions. 2026-08-25"
+    },
+    "dwellPool": {
+      "type": "array",
+      "pairs": [
+        1,
+        16
+      ],
+      "consumer": "composer/harmony.scd",
+      "doc": "[[bars, weight]] per dwell; stability tilts the draw toward the longer entries (~pickDwell). Replaces harmonyDwell. 2026-08-25"
+    },
+    "fxVerb": {
+      "type": "string",
+      "enum": [
+        "free",
+        "jp"
+      ],
+      "consumer": "composer/startup.scd",
+      "doc": "which reverb ppMaster selects: FreeVerb2 or JPverb (sc3-plugins). 2026-08-25"
+    },
+    "fxLpf": {
+      "type": "number",
+      "range": [
+        2000,
+        18000
+      ],
+      "consumer": "composer/startup.scd",
+      "doc": "master tone ceiling in Hz (lofi 5500). 2026-08-25"
+    },
+    "masterTrim": {
+      "type": "number",
+      "range": [
+        -12,
+        6
+      ],
+      "consumer": "composer/startup.scd",
+      "doc": "dB trim on the master makeup gain (2.8), per mood. 2026-08-25"
+    },
+    "fxWarp": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/startup.scd",
+      "doc": "tape depth: a shared slow pitch drift every sampler reads (\\ppWarpLfo). 0 = none. 2026-08-25"
+    },
+    "subLevel": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd",
+      "doc": "a sine an octave under the bass (\\ppSub), as a fraction of the bass note's amp. 2026-08-25"
+    },
+    "padHold": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd",
+      "doc": "> 0: the pad is held voices that glide between chords (\\ppBreathHeld), no per-bar restrike. drift. 2026-08-25"
+    },
+    "outroStyle": {
+      "type": "string",
+      "enum": [
+        "cadence",
+        "fade"
+      ],
+      "consumer": "composer/harmony.scd",
+      "doc": "cadence = ii/IV, V, I under the outro; fade = the tonic alone, plus one 8-bar tonic pedal mid-take. 2026-08-25"
+    },
+    "rhDensityCap": {
+      "type": "number",
+      "range": [
+        0.2,
+        1
+      ],
+      "consumer": "composer/improv.scd",
+      "doc": "ceiling on right-hand note density (grid 1.0, rubato 0.78, drift 0.25). 2026-08-25"
+    },
+    "rhPool": {
+      "type": "array",
+      "consumer": "composer/improv.scd",
+      "doc": "synth names the right hand is drawn from per take (repeats weight; [] = rightHandSynth every take). The instrument sits in the pianist's chair and inherits the pianist's phrasing; \\ppVibes is the first alternative. 2026-08-25"
+    },
+    "padPool": {
+      "type": "array",
+      "consumer": "composer/voices.scd",
+      "doc": "synth names the comp / pad instrument is drawn from per take by the keys player (repeats weight; [] = padSynth every take). \\ppLofiWurli is the first alternative to the Rhodes. 2026-08-26"
+    },
+    "seamless": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/lifecycle.scd",
+      "doc": "1 = no silence between tracks: the arc holds its body level through intro and outro (arc.scd), the pad gate stays open at track end, the weather gap is skipped, and the held voices glide into the next key on its first bar. Drift, 2026-08-26 (Anthony: 'it's supposed to be something to sleep to')."
+    },
+    "bassWindow": {
+      "type": "array",
+      "consumer": "composer/voices.scd",
+      "doc": "[lo, hi] MIDI: the bass player's absolute range where the bass is its own player (lofi's upright); the bassist's regLean walks the floor up to a minor third inside it and every bass note (the anchor and its doubled 7th/6th) folds by octaves into [floor, hi]. 2026-08-27 (Anthony: 'pretty high in this song to really sound like a bass'; measured median A2-C3, top decile to A3, over a two-octave fold)."
+    },
+    "fxHpf": {
+      "type": "number",
+      "range": [
+        10,
+        120
+      ],
+      "consumer": "composer/startup.scd",
+      "doc": "master low-cut in Hz (two cascaded 2nd-order high-passes, 24 dB/oct) after the DC block; the page's chain mirrors it. 2026-08-27 (Anthony, at the desk: 'a sane lowpass filter at like 20 Hz'). 24 for every room: the sub sine's floor is MIDI 24, 32.7 Hz."
+    },
+    "celloLift": {
+      "type": "number",
+      "range": [
+        -12,
+        12
+      ],
+      "consumer": "composer/voices.scd",
+      "doc": "semitones added to every section centre of the cello bed (~stringsCentre; the C2-E5 clamp stays). 2026-08-27 (Track C step 2): measured 18-20 st under the piano's line, an octave and a half; +5 puts the chorus on the A string, 13-15 st under."
+    },
+    "drumFeelPool": {
+      "type": "array",
+      "consumer": "composer/drums.scd",
+      "doc": "feels the drummer draws from per take (boombap / halftime / sparse, ~drumFeelDef: where the backbeat lives; repeats weight); [] = drumFeel every take. 2026-08-27 (Anthony: 'a lot of similar drumming patterns'; 39 takes all on 2 and 4 with straight 8ths)."
+    },
+    "bassPresence": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd",
+      "doc": "the upright's presence layer (\\ppDoubleBass): the note's own odd harmonics band-passed at 250 and 600 Hz so the bass reads on a laptop; 0 = the plain sample. 2026-08-27 (Anthony: 'hard to hear on a laptop'; the bass had just moved to E1-A2)."
+    },
+    "lhShare": {
+      "type": "number",
+      "range": [
+        0,
+        1
+      ],
+      "consumer": "composer/voices.scd",
+      "doc": "how much of the chord work the pianist's left hand takes per bar when a keys player is comping (padComp > 0); the chorus adds 0.25; 1 = full-handed. 2026-08-27: after the two-hands ruling lofi's comp onsets doubled (pad 22 -> 40/min, left hand 25 -> 52/min); 0.5 lets two comping players share the bar."
+    }
+  }
+}

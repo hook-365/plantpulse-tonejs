@@ -1,0 +1,358 @@
+{
+  "description": "The free release's rooms, drift and piano, copied from the live project's composer/moods.json by tools/sync-composer-data. Every key is read by the composer (static/js/composer/) and closed by mood-schema.json (tools/gate).",
+  "moods": [
+    {
+      "name": "piano",
+      "bpm": 72,
+      "scalePool": [
+        "major",
+        "major",
+        "major",
+        "minor",
+        "minor",
+        "lydian",
+        "dorian",
+        "mixolydian"
+      ],
+      "rootPool": [
+        "G",
+        "D",
+        "A",
+        "E",
+        "C",
+        "F",
+        "Bb",
+        "Eb"
+      ],
+      "trackDurRange": [
+        300,
+        480
+      ],
+      "rightHandLevel": 0.85,
+      "leftHandLevel": 0.75,
+      "padSynth": "ppPianoSampler",
+      "padLevel": 0,
+      "fxRoom": 0.85,
+      "fxMix": 0.35,
+      "fxDamp": 0.5,
+      "introBars": 8,
+      "outroBars": 8,
+      "padOctave": 0,
+      "weatherDepth": 0.6,
+      "phraseBarsMax": 6,
+      "duo": 0.7,
+      "sectionBars": 16,
+      "drumLevel": 0,
+      "drumSwing": 0,
+      "drumFeel": "sparse",
+      "vinylLevel": 0,
+      "phraseFeel": "rubato",
+      "lickSeed": 0.5,
+      "padComp": 0,
+      "leftHandSynth": "ppPianoSampler",
+      "rightHandSynth": "ppPianoSampler",
+      "duoSynth": "ppPianoSampler",
+      "rainLevel": 0,
+      "kitPool": [],
+      "motifForm": 0.85,
+      "hookJury": 1,
+      "phraseTargets": 0.65,
+      "periodForm": 0.7,
+      "lineRun": 0.6,
+      "themeHold": 0.7,
+      "regDrop": 5,
+      "lhFigure": 0.6,
+      "dynWide": 1,
+      "celloVoice": 0.5,
+      "ritDepth": 0.3,
+      "ritBars": 6,
+      "stringsProb": 0.5,
+      "stringsLevel": 0.38,
+      "handsChords": 1,
+      "pianoCompProb": 0,
+      "rhWindow": [
+        62,
+        88
+      ],
+      "funcTrans": {
+        "T": {
+          "T": 0.25,
+          "S": 0.45,
+          "D": 0.3,
+          "degs": [
+            [
+              0,
+              0.55
+            ],
+            [
+              5,
+              0.3
+            ],
+            [
+              2,
+              0.15
+            ]
+          ]
+        },
+        "S": {
+          "T": 0.25,
+          "S": 0.2,
+          "D": 0.55,
+          "degs": [
+            [
+              3,
+              0.55
+            ],
+            [
+              1,
+              0.45
+            ]
+          ]
+        },
+        "D": {
+          "T": 0.8,
+          "S": 0.08,
+          "D": 0.12,
+          "degs": [
+            [
+              4,
+              0.75
+            ],
+            [
+              6,
+              0.25
+            ]
+          ]
+        }
+      },
+      "chordColor": {
+        "T": {
+          "triad": 0.55,
+          "add9": 0.25,
+          "seventh": 0.15,
+          "sus2": 0.05
+        },
+        "S": {
+          "seventh": 0.55,
+          "triad": 0.35,
+          "add9": 0.1
+        },
+        "D": {
+          "seventh": 0.45,
+          "triad": 0.3,
+          "sus4>seventh": 0.25
+        }
+      },
+      "dwellPool": [
+        [
+          1,
+          0.25
+        ],
+        [
+          2,
+          0.5
+        ],
+        [
+          4,
+          0.25
+        ]
+      ],
+      "fxVerb": "jp",
+      "fxLpf": 18000,
+      "masterTrim": 0,
+      "fxWarp": 0,
+      "subLevel": 0,
+      "padHold": 0,
+      "outroStyle": "cadence",
+      "rhDensityCap": 0.78,
+      "rhPool": [],
+      "padPool": [],
+      "seamless": 0,
+      "bassWindow": [
+        28,
+        45
+      ],
+      "fxHpf": 24,
+      "celloLift": 7,
+      "drumFeelPool": [],
+      "bassPresence": 0,
+      "lhShare": 1
+    },
+    {
+      "name": "drift",
+      "bpm": 52,
+      "scalePool": [
+        "dorian",
+        "dorian",
+        "minor",
+        "minor",
+        "lydian",
+        "major"
+      ],
+      "rootPool": [
+        "E",
+        "A",
+        "D",
+        "G",
+        "C",
+        "F",
+        "B"
+      ],
+      "trackDurRange": [
+        420,
+        600
+      ],
+      "rightHandLevel": 0,
+      "leftHandLevel": 0,
+      "padSynth": "ppBreath",
+      "padLevel": 0.9,
+      "fxRoom": 0.92,
+      "fxMix": 0.48,
+      "fxDamp": 0.6,
+      "introBars": 8,
+      "outroBars": 8,
+      "padOctave": 0,
+      "weatherDepth": 0.4,
+      "phraseBarsMax": 4,
+      "duo": 0,
+      "sectionBars": 0,
+      "drumLevel": 0,
+      "drumSwing": 0,
+      "drumFeel": "sparse",
+      "vinylLevel": 0,
+      "phraseFeel": "rubato",
+      "lickSeed": 0,
+      "padComp": 0,
+      "leftHandSynth": "ppPianoSampler",
+      "rightHandSynth": "ppPianoSampler",
+      "duoSynth": "ppPianoSampler",
+      "rainLevel": 0,
+      "kitPool": [],
+      "motifForm": 0,
+      "hookJury": 0,
+      "phraseTargets": 0,
+      "periodForm": 0,
+      "lineRun": 0,
+      "themeHold": 0,
+      "regDrop": 0,
+      "lhFigure": 0,
+      "dynWide": 0,
+      "celloVoice": 0,
+      "ritDepth": 0.14,
+      "ritBars": 4,
+      "stringsProb": 0,
+      "stringsLevel": 0,
+      "handsChords": 0,
+      "pianoCompProb": 0,
+      "rhWindow": [
+        72,
+        84
+      ],
+      "funcTrans": {
+        "T": {
+          "T": 0.35,
+          "S": 0.45,
+          "D": 0.2,
+          "degs": [
+            [
+              0,
+              0.55
+            ],
+            [
+              5,
+              0.35
+            ],
+            [
+              2,
+              0.1
+            ]
+          ]
+        },
+        "S": {
+          "T": 0.6,
+          "S": 0.1,
+          "D": 0.3,
+          "degs": [
+            [
+              3,
+              0.8
+            ],
+            [
+              1,
+              0.2
+            ]
+          ]
+        },
+        "D": {
+          "T": 0.85,
+          "S": 0.1,
+          "D": 0.05,
+          "degs": [
+            [
+              6,
+              0.6
+            ],
+            [
+              4,
+              0.4
+            ]
+          ]
+        }
+      },
+      "chordColor": {
+        "T": {
+          "seventh": 0.3,
+          "add9": 0.3,
+          "sus2": 0.2,
+          "open5": 0.2
+        },
+        "S": {
+          "add9": 0.35,
+          "seventh": 0.3,
+          "sus2": 0.2,
+          "triad": 0.15
+        },
+        "D": {
+          "sus2": 0.3,
+          "open5": 0.25,
+          "seventh": 0.25,
+          "triad": 0.2
+        }
+      },
+      "dwellPool": [
+        [
+          6,
+          0.35
+        ],
+        [
+          8,
+          0.4
+        ],
+        [
+          10,
+          0.25
+        ]
+      ],
+      "fxVerb": "jp",
+      "fxLpf": 18000,
+      "masterTrim": 0,
+      "fxWarp": 0,
+      "subLevel": 0.5,
+      "padHold": 1,
+      "outroStyle": "fade",
+      "rhDensityCap": 0.25,
+      "rhPool": [],
+      "padPool": [],
+      "seamless": 1,
+      "bassWindow": [
+        28,
+        45
+      ],
+      "fxHpf": 24,
+      "celloLift": 0,
+      "drumFeelPool": [],
+      "bassPresence": 0,
+      "lhShare": 1
+    }
+  ]
+}
