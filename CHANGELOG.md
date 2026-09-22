@@ -11,7 +11,7 @@ The composer, in your browser.
 - `docker compose up` works on a fresh machine: no external networks, an optional bundled broker (`--profile broker`, `tools/broker-password`), an optional fake plant (`--profile demo`, `tools/simulate-signal`), a healthcheck.
 - The server reconnects to a broker that comes up late (the old synchronous connect stayed deaf after one failure), serves the sample packs (`/api/samples/*`), spools each take's note log (`POST /api/take`), and sends no-cache for its static files so a browser never plays yesterday's engine.
 - `plantpulse.yaml` takes the broker address and username from `secrets.yaml`; the second ADS1115 is an optional block.
-- The page makes no third-party requests: Chart.js is vendored; the fonts are the system's.
+- The page is the live project's front page (stage, room pills, deck, players' words, progress, and the piano roll with the leaf's trace on the same clock), driven by the local composer. No third-party requests: the two fonts are self-hosted.
 - Tone.js is not used. The port's instruments are the live engine's SynthDefs node for node in plain Web Audio on the browser's own context. The repository's name is history.
 
 ### Removed

@@ -3,155 +3,306 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PlantPulse</title>
-  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <title>PlantPulse — live music from a living plant</title>
+  <meta name="description" content="A living plant improvises music, continuously, in your browser. Nothing is pre-recorded; the music never repeats.">
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
   <!-- vendored: no third-party requests from this page (NOTICE.md) -->
-  <script src="/static/vendor/chart.umd.js"></script>
-  <script type="module" src="/static/js/app.js"></script>
+  <link rel="stylesheet" href="/static/vendor/fonts/fonts.css">
+  <script type="module" src="/static/js/ui/page.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    /* ============================================================
+       PlantPulse 2.0 — "the signal is the stage"
+       The live project's roll page, in the browser: the plant gets top
+       billing, its live trace is the backdrop, and the page has one job:
+       play. leaf = plant, copper = music.
+       ============================================================ */
     :root {
-      --bg: #0c111d; --panel: #141c2e; --line: #1e2d4a; --card: #0f1520; --card-line: #1a2540;
-      --ink: #e8ecf4; --muted: #8896b0; --dim: #4d5d78;
-      --leaf: #34d399; --copper: #d4956a; --gold: #e2b96f; --violet: #a78bfa; --blue: #6ea8fe; --rose: #f87171;
+      --soil: #0b100c; --panel: #121a14; --inset: #080d09;
+      --hairline: #223226; --hairline-2: #2f4434;
+      --linen: #e9ede6; --fog: #94a294; --fog-2: #5f6f61;
+      --leaf: #7bc96a; --copper: #d4885c; --rust: #e0685c;
+      --mono: 'Share Tech Mono', monospace;
+      --serif: 'Instrument Serif', serif;
+      --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
     }
-    body { background: var(--bg); color: var(--ink); font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; min-height: 100vh; overflow-x: hidden; }
-    body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(52,211,153,0.10) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(110,168,254,0.07) 0%, transparent 50%),
-        radial-gradient(ellipse 50% 50% at 10% 40%, rgba(212,149,106,0.05) 0%, transparent 50%); }
-    header { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 24px;
-      border-bottom: 1px solid transparent; border-image: linear-gradient(90deg, rgba(52,211,153,0.3), rgba(110,168,254,0.35) 50%, rgba(167,139,250,0.3)) 1; }
-    .logo img { height: 28px; width: auto; display: block; }
-    .header-links { display: flex; gap: 14px; align-items: center; }
-    .header-link { color: var(--muted); font-size: 12px; text-decoration: none; cursor: pointer; }
-    .header-link:hover { color: var(--ink); }
-    .connection-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); transition: background .3s; }
-    .status-dot.connected { background: var(--leaf); box-shadow: 0 0 8px rgba(52,211,153,.5); }
-    .status-dot.error { background: var(--rose); box-shadow: 0 0 8px rgba(248,113,113,.5); }
-    .section-panel { position: relative; z-index: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 12px 24px; box-shadow: 0 2px 8px -2px rgba(0,0,0,.3); }
-    .section-panel:first-of-type { margin-top: 16px; }
-    @media (max-width: 768px) { .section-panel { margin: 8px 10px; padding: 10px; } header { padding: 10px 12px; } }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
-    .plant-info { min-width: 180px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
-    .plant-name { font-family: Georgia, 'Times New Roman', serif; font-size: 22px; color: var(--ink); }
-    .plant-type { font-size: 11px; color: var(--muted); }
-    .stats-bar { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
-    .stat-card { background: var(--card); border: 1px solid var(--card-line); border-radius: 6px; padding: 6px 10px; flex: 1; min-width: 92px; }
-    .stat-card .label { font-size: 9px; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; }
-    .stat-card .value { font-size: 15px; color: var(--ink); margin-top: 2px; font-variant-numeric: tabular-nums; }
-    .stat-card .unit { font-size: 9px; color: var(--muted); }
-    .meter { height: 4px; background: var(--card-line); border-radius: 2px; margin-top: 5px; overflow: hidden; }
-    .meter > i { display: block; height: 100%; width: 0; background: var(--leaf); transition: width .4s; }
-    .meter.center > i { background: var(--blue); } .meter.tilt > i { background: var(--copper); } .meter.stab > i { background: var(--violet); } .meter.weather > i { background: var(--gold); }
-    h2 { font-size: 11px; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 10px; font-weight: normal; }
-    .rooms { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-    .room { background: var(--card); border: 1px solid var(--card-line); border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: border-color .2s, background .2s; }
-    .room:hover { border-color: var(--dim); }
-    .room.active { border-color: var(--leaf); background: #0f1a22; }
-    .room .name { font-family: Georgia, serif; font-size: 18px; color: var(--ink); text-transform: capitalize; }
-    .room .blurb { font-size: 11px; color: var(--muted); margin-top: 4px; }
-    .deck { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-    button { font-family: inherit; font-size: 12px; color: var(--ink); background: var(--card); border: 1px solid var(--card-line); border-radius: 6px; padding: 8px 14px; cursor: pointer; }
-    button:hover { border-color: var(--dim); }
-    button.play { background: #123227; border-color: var(--leaf); font-size: 14px; padding: 9px 22px; }
-    button.play.on { background: #3a1f1f; border-color: var(--rose); }
-    button:disabled { opacity: .45; cursor: default; }
-    .vol { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    input[type=range] { accent-color: var(--copper); width: 110px; }
-    .now { margin-top: 12px; font-size: 12px; color: var(--muted); line-height: 1.7; min-height: 3.4em; }
-    .now b { color: var(--ink); font-weight: normal; }
-    .now .tag { color: var(--dim); }
-    .words { color: var(--copper); }
-    .words.cellist { color: var(--violet); }
-    .path { color: var(--gold); }
-    .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
-    .window-selector { display: flex; gap: 6px; margin-bottom: 8px; }
-    .window-selector button { padding: 3px 10px; font-size: 10px; }
-    .window-selector button.active { border-color: var(--leaf); color: var(--leaf); }
-    .chart-box { position: relative; height: 240px; }
-    .about-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 50; align-items: center; justify-content: center; padding: 16px; }
-    .about-modal.show { display: flex; }
-    .about-content { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 640px; max-height: 90vh; overflow: auto; padding: 24px 26px; position: relative; font-size: 13px; line-height: 1.6; }
-    .about-content h2 { font-family: Georgia, serif; font-size: 22px; text-transform: none; letter-spacing: 0; color: var(--ink); margin-bottom: 10px; }
-    .about-content h3 { font-size: 12px; color: var(--copper); margin: 16px 0 6px; letter-spacing: .1em; text-transform: uppercase; font-weight: normal; }
-    .about-content p { margin-bottom: 8px; color: var(--ink); }
-    .about-content a { color: var(--blue); }
-    .about-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--muted); font-size: 22px; padding: 2px 6px; }
-    footer { position: relative; z-index: 1; text-align: center; font-size: 10px; color: var(--dim); padding: 14px 24px 22px; }
-    footer a { color: var(--muted); text-decoration: none; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { color-scheme: dark; scroll-behavior: smooth; }
+    body { background: var(--soil); color: var(--linen); font-family: var(--sans); font-size: 15px; min-height: 100vh; }
+    a { color: inherit; }
+    button { font: inherit; cursor: pointer; }
+    :focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+    /* ---------- header (floats over the stage) ---------- */
+    header { position: relative; z-index: 3; display: flex; align-items: baseline; gap: 16px; padding: 18px 28px; pointer-events: none; }
+    header a, header button { pointer-events: auto; }
+    .wordmark { font-family: var(--serif); font-style: italic; font-size: 22px; color: var(--linen); text-decoration: none; }
+    .wordmark em { color: var(--leaf); font-style: italic; }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+    .conn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; color: var(--fog); text-transform: uppercase; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fog-2); }
+    .dot.connected { background: var(--leaf); box-shadow: 0 0 7px rgba(123,201,106,0.7); }
+    .dot.error { background: var(--rust); }
+    .header-link { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--fog); text-decoration: none; border-bottom: 1px dotted var(--hairline-2); }
+    .header-link:hover { color: var(--linen); }
+    /* ---------- the stage ---------- */
+    .stage { position: relative; height: min(78vh, 640px); min-height: 480px; overflow: hidden; border-bottom: 1px solid var(--hairline); margin-top: -62px; }
+    .stage-art { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 1.2s ease; }
+    .stage-art.on { opacity: 0.58; }
+    body.watching .stage-art.on { opacity: 0.55; }
+    .stage-scrim::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 46% 62% at 50% 52%, rgba(11,16,12,0.78) 0%, rgba(11,16,12,0.55) 45%, rgba(11,16,12,0) 100%); }
+    .stage-inner .thesis, .stage-inner .room-blurb, .stage-inner .now-playing, .stage-inner .pianist,
+    .stage-inner .artist-eyebrow, .stage-inner .deck-hint { text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 14px rgba(0,0,0,0.6); }
+    .stage-trace { position: absolute; inset: 0; opacity: 0.9; }
+    .stage-trace canvas { display: block; width: 100%; height: 100%; }
+    .stage-scrim { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(11,16,12,0.90) 0%, rgba(11,16,12,0.30) 45%, rgba(11,16,12,0.88) 100%); }
+    .stage-inner { position: relative; z-index: 2; height: 100%; max-width: 980px; margin: 0 auto; padding: 0 28px 40px; display: flex; flex-direction: column; justify-content: flex-end; text-align: center; align-items: center; }
+    .artist-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--leaf); margin-bottom: 14px; }
+    .artist { font-family: var(--serif); font-style: italic; font-size: clamp(44px, 9vw, 92px); line-height: 0.95; text-shadow: 0 2px 28px rgba(11,16,12,0.9); }
+    .thesis { margin-top: 14px; font-family: var(--serif); font-style: italic; font-size: 19px; color: var(--fog); }
+    .thesis b { color: var(--linen); font-weight: 400; }
+    /* the rooms: pills above the deck */
+    .rooms { display: inline-flex; gap: 6px; margin: 18px 0 14px; padding: 4px; border-radius: 999px; border: 1px solid rgba(233,237,230,0.22); background: rgba(11,16,12,0.55); }
+    .room-pill { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; padding: 8px 16px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: #cfd6cc; transition: color .2s, background .2s, border-color .2s; }
+    .room-pill:hover { color: var(--linen); }
+    .room-pill.on { color: var(--soil); background: var(--linen); border-color: var(--linen); }
+    .room-blurb { display: block; margin: -6px 0 12px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; line-height: 14px; color: #c9d0c6; min-height: 28px; }
+    /* the deck: one way to listen here (the live site adds a radio stream), the volume beside it */
+    .deck { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; --ctl: 50px; }
+    .play-btn { width: var(--ctl); height: var(--ctl); flex: none; border-radius: 50%; border: 1px solid var(--copper); background: rgba(212,136,92,0.12); color: var(--copper); font-size: 18px;
+                display: inline-flex; align-items: center; justify-content: center; transition: background 0.2s ease, transform 0.15s ease; box-shadow: 0 0 28px rgba(212,136,92,0.15); }
+    .play-btn:hover { background: rgba(212,136,92,0.26); transform: scale(1.05); }
+    .play-btn.playing { background: var(--copper); color: var(--soil); }
+    .ways { display: flex; width: 100%; max-width: 520px; align-items: stretch; justify-content: center; }
+    .way { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 7px 12px 7px 7px; border-radius: 20px; border: 1px solid var(--hairline-2); background: rgba(11,16,12,0.42); text-align: left; transition: border-color .2s, background .2s; }
+    .way.on { border-color: rgba(233,237,230,0.4); background: rgba(11,16,12,0.62); }
+    .way-text { min-width: 0; flex: 1; }
+    .way-text b { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--linen); font-weight: 400; }
+    .way-text span { display: block; margin-top: 2px; font-family: var(--serif); font-style: italic; font-size: 13.5px; line-height: 1.25; color: var(--fog); }
+    .way-text .st { display: block; margin-top: 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--copper); font-style: normal; min-height: 12px; }
+    .deck-vol { margin-top: 8px; display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .vol { display: inline-flex; align-items: center; gap: 8px; color: var(--fog); height: 32px; padding: 0 16px 0 8px; border-radius: 999px; border: 1px solid var(--hairline-2); background: rgba(233,237,230,0.03); }
+    .vol-btn { width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; color: var(--fog); display: inline-flex; align-items: center; justify-content: center; }
+    .vol-btn:hover { color: var(--copper); }
+    .vol-btn svg { width: 18px; height: 18px; fill: currentColor; }
+    .vol-btn.muted svg { opacity: 0.45; }
+    .vol input[type=range] { -webkit-appearance: none; appearance: none; width: 96px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.16); outline: none; margin: 0; cursor: pointer; }
+    .vol input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--copper); border: 0; box-shadow: 0 0 10px rgba(0,0,0,0.35); }
+    .vol input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--copper); border: 0; }
+    .small-btn { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--hairline-2); background: rgba(233,237,230,0.03); color: var(--fog); }
+    .small-btn:hover { color: var(--linen); border-color: var(--fog); }
+    .small-btn.on { color: var(--rust); border-color: var(--rust); }
+    .deck-hint { display: block; min-width: 0; text-align: center; min-height: 14px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; color: var(--fog); text-transform: uppercase; }
+    .now-playing { margin-top: 26px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fog); }
+    .now-playing b { color: var(--linen); font-weight: 400; }
+    .now-playing .key { color: var(--copper); }
+    .players { height: 52px; flex: none; width: 100%; overflow: hidden; }   /* two rows of .pianist: 8 + 18 each; flex none so the column never squeezes it */
+    .pianist { margin-top: 8px; font-family: var(--serif); font-style: italic; font-size: 15px; line-height: 18px; color: var(--fog); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pianist b { color: var(--linen); font-weight: 400; }
+    .stage-progress { margin-top: 14px; width: 100%; max-width: 560px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--fog-2); text-transform: uppercase; }
+    .track-bar { height: 3px; background: rgba(233,237,230,0.14); border-radius: 2px; overflow: hidden; }
+    .track-fill { height: 100%; width: 0%; background: var(--copper); opacity: 0.85; transition: width 1s linear; }
+    @media (max-width: 600px) {
+      body:not(.watching) .stage { height: auto; min-height: min(78vh, 640px); }
+      body:not(.watching) .stage-inner { padding-top: 72px; }
+    }
+    /* ---------- watch: the roll under a shrunken stage ---------- */
+    body.watching .rooms { margin-bottom: 8px; } body.watching .room-blurb { display: none; }
+    body.watching .stage { height: 320px; min-height: 320px; }
+    body.watching .artist-eyebrow { display: none; }
+    body.watching .stage-trace { opacity: 0; }
+    body.watching .stage-inner { padding-bottom: 18px; }
+    body.watching .artist { font-size: clamp(32px, 5vw, 52px); }
+    body.watching .thesis { display: none; }
+    body.watching .deck { --ctl: 40px; gap: 10px; }
+    body.watching .play-btn { font-size: 15px; box-shadow: none; }
+    body.watching .way { padding: 5px 12px 5px 5px; border-radius: 999px; }
+    body.watching .way-text span { display: none; }
+    body.watching .now-playing { margin-top: 12px; }
+    body.watching .stage-progress { margin-top: 8px; }
+    .watch-wrap { padding: 0 28px; }
+    .watch { position: relative; max-width: 980px; margin: 18px auto 0; height: 470px; border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; background: var(--inset); }
+    .watch canvas { display: block; width: 100%; height: 100%; }
+    .watch-tools { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 20px 10px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+                   font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fog-2);
+                   background: linear-gradient(180deg, rgba(11,16,12,0) 0%, rgba(11,16,12,0.85) 60%); pointer-events: none; }
+    .watch-tools .key { color: var(--fog); margin-right: 10px; }
+    .watch-tools .sw { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; box-shadow: 0 0 6px currentColor; }
+    #loading { margin-left: auto; opacity: 0; transition: opacity .4s; }
+    #loading.show { opacity: 1; }
+    .watch-note { max-width: 980px; margin: 10px auto 0; padding: 0 28px; text-align: center; font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fog-2); }
+    @media (max-width: 700px) {
+      body.watching .stage { height: auto; min-height: 0; }
+      body.watching .stage-inner { padding-top: 68px; }
+      .watch { height: 60vh; min-height: 360px; border-radius: 0; border-left: 0; border-right: 0; }
+      .watch-wrap { padding: 0; }
+      .stage { min-height: 430px; }
+      .thesis { font-size: 16px; }
+      header { flex-wrap: wrap; }
+    }
+    /* ---------- about band ---------- */
+    .about { max-width: 720px; margin: 0 auto; padding: 44px 28px 10px; text-align: center; }
+    .about p.lede { font-family: var(--serif); font-style: italic; font-size: 21px; line-height: 1.5; color: var(--linen); }
+    .about p.lede em { color: var(--leaf); }
+    .garden { margin-top: 20px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+    .chip { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fog); border: 1px solid var(--hairline-2); border-radius: 4px; padding: 5px 10px; }
+    .chip b { color: var(--linen); font-weight: 400; }
+    details.howto { margin-top: 26px; text-align: left; }
+    details.howto summary { font-family: var(--mono); font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--fog-2); cursor: pointer; text-align: center; list-style: none; }
+    details.howto summary::-webkit-details-marker { display: none; }
+    details.howto summary:hover { color: var(--fog); }
+    details.howto .howto-body { margin-top: 18px; color: var(--fog); line-height: 1.65; font-size: 14px; }
+    details.howto .howto-body p + p { margin-top: 12px; }
+    details.howto .howto-body strong { color: var(--linen); font-weight: 600; }
+    details.howto .howto-body code { font-family: var(--mono); font-size: 12px; color: var(--linen); }
+    /* ---------- the signals ---------- */
+    .signals { max-width: 720px; margin: 44px auto 0; padding: 0 28px; }
+    .signals-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+    .signals-title { font-family: var(--serif); font-style: italic; font-size: 20px; }
+    .signals-title em { color: var(--leaf); }
+    .signals-sub { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fog-2); }
+    .sigrow2 { display: grid; grid-template-columns: 92px 1fr 58px; gap: 8px 16px; align-items: center; margin-bottom: 4px; font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--fog); }
+    .sigrow2 .lbl { letter-spacing: 0.18em; }
+    .meter { position: relative; height: 8px; border-radius: 4px; background: var(--inset); border: 1px solid var(--hairline); overflow: hidden; }
+    .meter-fill { position: absolute; top: 0; bottom: 0; background: rgba(123,201,106,0.65); transition: left 0.8s ease, width 0.8s ease; }
+    .meter.bipolar::after { content: ''; position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: rgba(233,237,230,0.3); }
+    .sig-val { font-family: var(--mono); font-size: 12px; color: var(--linen); text-align: right; }
+    .sig-gloss { grid-column: 2 / 4; font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fog-2); margin: -2px 0 12px; }
+    /* ---------- footer ---------- */
+    footer { margin-top: 48px; padding: 22px 28px 40px; border-top: 1px solid var(--hairline); display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 8px 16px; border-radius: 5px; background: var(--inset); color: var(--fog); border: 1px solid var(--hairline-2); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
+    .btn:hover { color: var(--linen); border-color: var(--fog); }
+    .foot-note { width: 100%; text-align: center; margin-top: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fog-2); }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
   </style>
 </head>
 <body>
   <header>
-    <div class="logo"><img src="/logo.svg" alt="PlantPulse"></div>
-    <div class="header-links">
-      <a class="header-link" id="aboutOpen">About</a>
-      <a class="header-link" href="https://github.com/hook-365/plantpulse-tonejs" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a class="header-link" href="https://buymeacoffee.com/anthonyhook" target="_blank" rel="noopener noreferrer">&#9749; Buy me a coffee</a>
-    </div>
-    <div class="connection-status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">connecting</span>
+    <a class="wordmark" href="/">Plant<em>Pulse</em></a>
+    <div class="header-right">
+      <div class="conn"><span class="dot" id="sse-dot"></span><span id="sse-status">...</span></div>
+      <a class="header-link" href="https://github.com/hook-365/plantpulse-tonejs" rel="noopener">Source</a>
     </div>
   </header>
 
-  <div class="about-modal" id="aboutModal">
-    <div class="about-content">
-      <button class="about-close" id="aboutClose">&times;</button>
-      <h2>PlantPulse</h2>
-      <p>A living plant conducting a band. Two alligator clips on a leaf pick up its bioelectrical signal; an ESP32 streams the volts; this page hears the plant as four signals ranked against its own day (how lively, how settled, where it sits, which way it is heading) and a composer in the browser plays from them.</p>
-      <h3>The rooms</h3>
-      <p><strong>drift</strong> is a slow breathing drone: held voices cross-fading through a harmony walk, a sub under the root, the plant's energy opening the timbre while it rings. It needs no samples.<br>
-      <strong>piano</strong> seats a pianist drawn fresh every song (touch, rhythm, register, how they develop an idea) with two hands on a sampled grand, and about half the time a cellist. It plays the Salamander Grand Piano and the Philharmonia cello, fetched from their publishers by <code>tools/fetch-samples</code>.</p>
-      <h3>The music</h3>
-      <p>Nothing is scripted and nothing is stored: every phrase is generated, remembered for the song, developed (never verbatim), and the song's hook is frozen from its own opening. The harmony is a walk over tonic, subdominant and dominant with the plant leaning it home or away. The same decisions run the live SuperCollider engine at <a href="https://plantpulse.hook.technology" target="_blank" rel="noopener noreferrer">plantpulse.hook.technology</a>; this is the free browser port.</p>
-      <h3>Hardware</h3>
-      <p>ESP32-WROOM-32D, ADS1115 ADC, soft alligator clips. About $15. Build instructions on <a href="https://github.com/hook-365/plantpulse-tonejs" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
-      <p style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--dim)">Built by <a href="https://github.com/hook-365">Anthony Hook</a>. MIT; sample credits in NOTICE.md.</p>
-    </div>
-  </div>
-
-  <div class="section-panel">
-    <div class="row">
-      <div class="plant-info">
-        <div class="plant-name" id="plantName">--</div>
-        <div class="plant-type" id="plantType">--</div>
-        <div class="hint" id="dayHint">warming up: the ranks need the plant's own day</div>
+  <!-- The stage: the plant's live signal is the backdrop; the plant is the headliner -->
+  <section class="stage">
+    <div class="stage-art" id="stage-art" aria-hidden="true"></div>
+    <div class="stage-trace"><canvas id="signalChart"></canvas></div>
+    <div class="stage-scrim"></div>
+    <div class="stage-inner">
+      <div class="artist-eyebrow">Live from the windowsill</div>
+      <h1 class="artist" id="plant-name">PlantPulse</h1>
+      <p class="thesis">Live music, improvised by a <b id="plant-type">living plant</b>, in your browser.</p>
+      <div class="rooms" id="rooms" role="tablist" aria-label="Which performance"></div>
+      <span class="room-blurb" id="room-blurb"></span>
+      <div class="ways deck" id="ways">
+        <div class="way" id="way-watch">
+          <button class="play-btn" id="play-btn" aria-label="Play here, and watch the notes as she plays them" title="Play here, and watch the notes as she plays them">▶</button>
+          <div class="way-text"><b>Watch her play</b><span>The notes drawn as she plays them, composed and sounded right here. Keep the page open.</span><i class="st" id="watch-status"></i></div>
+        </div>
       </div>
-      <div class="stats-bar">
-        <div class="stat-card"><div class="label">Raw</div><div class="value" id="rawValue">-- <span class="unit">mV</span></div></div>
-        <div class="stat-card"><div class="label">Smoothed</div><div class="value" id="smoothedValue">-- <span class="unit">mV</span></div></div>
-        <div class="stat-card"><div class="label">Energy</div><div class="value" id="energyValue">--</div><div class="meter"><i id="energyMeter"></i></div></div>
-        <div class="stat-card"><div class="label">Stability</div><div class="value" id="stabValue">--</div><div class="meter stab"><i id="stabMeter"></i></div></div>
-        <div class="stat-card"><div class="label">Center</div><div class="value" id="centerValue">--</div><div class="meter center"><i id="centerMeter"></i></div></div>
-        <div class="stat-card"><div class="label">Tilt</div><div class="value" id="tiltValue">--</div><div class="meter tilt"><i id="tiltMeter"></i></div></div>
-        <div class="stat-card"><div class="label">Weather</div><div class="value" id="weatherValue">--</div><div class="meter weather"><i id="weatherMeter"></i></div></div>
+      <div class="deck-vol">
+        <span class="vol" id="vol"><button type="button" class="vol-btn" id="vol-btn" aria-label="Mute" title="Mute"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.47 4.47 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z"/></svg></button><input type="range" id="vol-range" min="0" max="1" step="0.01" value="1" aria-label="Volume" title="Volume"></span>
+        <button type="button" class="small-btn" id="rec-btn" title="Record what you hear to a .webm file">● record</button>
+        <button type="button" class="small-btn" id="take-btn" hidden title="Download the last finished track's note log (tools/take-review reads it)">↓ last take</button>
+      </div>
+      <div class="deck-hint" id="deck-hint"></div>
+      <div class="now-playing" id="now-playing">
+        <span class="key" id="np-key">—</span> · <b id="np-mood">—</b> · <b id="np-bpm">—</b> bpm
+      </div>
+      <div class="players">
+        <div class="pianist" id="pianist" hidden>current pianist · <b id="pianist-words">—</b></div>
+        <div class="pianist" id="cellist" hidden>current cellist · <b id="cellist-words">—</b></div>
+      </div>
+      <div class="stage-progress">
+        <span id="np-elapsed">—</span>
+        <div class="track-bar"><div class="track-fill" id="np-fill"></div></div>
+        <span id="np-total">—</span>
       </div>
     </div>
+  </section>
+
+  <!-- Watch: the leaf's signal above the notes it chose, one clock -->
+  <div class="watch-wrap" id="watch" hidden>
+    <section class="watch">
+      <canvas id="rollCanvas"></canvas>
+      <div class="watch-tools">
+        <span id="roll-legend">
+          <span class="key" data-role="rh" hidden><i class="sw" style="background:#d4885c;color:#d4885c"></i>right hand</span>
+          <span class="key" data-role="lh" hidden><i class="sw" style="background:#e8c27a;color:#e8c27a"></i>left hand</span>
+          <span class="key" data-role="bass" hidden><i class="sw" style="background:#6e9bd2;color:#6e9bd2"></i>upright bass</span>
+          <span class="key" data-role="pad" hidden><i class="sw" style="background:#b7879c;color:#b7879c"></i>keys</span>
+          <span class="key" data-role="duo" hidden><i class="sw" style="background:#e0685c;color:#e0685c"></i>second player</span>
+          <span class="key" data-role="cello" hidden><i class="sw" style="background:#b48ee6;color:#b48ee6"></i>cello</span>
+        </span>
+        <span id="loading">loading the instruments · <span id="samples">0</span> / <span id="samplesTotal">…</span></span>
+      </div>
+    </section>
+    <div class="watch-note">the leaf's voltage above · the notes it chose below · one clock · the composer runs three seconds ahead of the sound</div>
   </div>
 
-  <div class="section-panel">
-    <h2>The band</h2>
-    <div class="rooms" id="rooms"></div>
-    <div class="deck">
-      <button class="play" id="playBtn">&#9654; play</button>
-      <div class="vol"><span>vol</span><input type="range" id="volume" min="0" max="1" step="0.01" value="0.8"></div>
-      <button id="recBtn" title="record what you hear to a .webm file">&#9679; rec</button>
-      <button id="takeBtn" disabled title="the last take's note log, the file tools/take-review reads">save take</button>
-      <span class="hint" id="libraryHint"></span>
+  <!-- About -->
+  <section class="about">
+    <p class="lede">Every note you hear is being shaped, in real time, by the bioelectrical pulse of <em>a living plant</em>. Nothing is pre-recorded and the music never repeats. Calm days get sparse, patient music; lively days get denser, bolder playing.</p>
+    <div class="garden" id="garden">
+      <span class="chip" id="chip-signal">signal <b id="chip-mv">—</b></span>
+      <span class="chip" id="day-hint"></span>
     </div>
-    <div class="now" id="now"><span class="tag">press play: the room seats its players when the music starts</span></div>
-  </div>
+    <details class="howto">
+      <summary>How this works +</summary>
+      <div class="howto-body">
+        <p>A living plant generates tiny bioelectrical voltages as it responds to light, water, touch, and time. We measure those voltages, then let them compose music.</p>
+        <p><strong>The signal chain.</strong> An ESP32 microcontroller with a 16-bit ADC reads the leaf voltage in millivolts and streams it over MQTT. A small Flask server forwards it to this page. Everything else happens in your browser: the page analyzes the stream for energy (how lively), stability (how settled), center and tilt, each read as a rank against the plant's own last 24 hours, and tracks the plant's slow daily character: its weather.</p>
+        <p><strong>The music engine.</strong> A JavaScript port of PlantPulse's SuperCollider improviser turns those features into musical decisions in real time. Harmony moves as a walk through tension and resolution rather than a loop. Every phrase is played fresh, then remembered briefly so later phrases can develop it in a changed form. The plant's energy shapes how densely and how loudly the music plays, and its weather sets each track's palette and pace. Two rooms: <strong>piano</strong> is solo piano, sometimes with a cello; <strong>drift</strong> is a slow breathing drone with no pianist at all, something to sleep to.</p>
+        <p><strong>The players.</strong> Every piece draws its players fresh. The pianist is drawn first: touch, rhythm feel, how much space they leave, how they move through a line. The piano room sometimes seats a cellist, with their own vibrato, bow length and taste for rests. Their words appear under the title while they play.</p>
+        <p><strong>The instruments.</strong> The piano is the Salamander Grand and the cello is the Philharmonia Orchestra's; both are fetched from their publishers by <code>tools/fetch-samples</code> and never redistributed here. Drift needs no samples at all.</p>
+        <p><strong>Track length and tempo.</strong> Each piece picks its own length when it begins, five to eight minutes (drift stretches to ten), and plays as one continuous improvisation until the harmony walks home and closes on a cadence with a slight slowing, the way a pianist ends a piece.</p>
+        <p>The plant is the conductor; the trace behind the title is its signal, live.</p>
+      </div>
+    </details>
+  </section>
 
-  <div class="section-panel">
-    <div class="window-selector">
-      <button data-win="30" class="active">30s</button><button data-win="60">1m</button><button data-win="120">2m</button><button data-win="300">5m</button>
+  <!-- The signals: the composer's actual inputs, live -->
+  <section class="signals">
+    <div class="signals-head">
+      <span class="signals-title">What the plant is <em>deciding with</em></span>
     </div>
-    <div class="chart-box"><canvas id="plantChart"></canvas></div>
-  </div>
+    <div class="sigrow2">
+      <span class="lbl">Energy</span>
+      <div class="meter"><div class="meter-fill" id="m-energy"></div></div>
+      <span class="sig-val" id="mv-energy">&#8212;</span>
+      <span class="sig-gloss">how lively the signal is; sets note density and touch</span>
+    </div>
+    <div class="sigrow2">
+      <span class="lbl">Stability</span>
+      <div class="meter"><div class="meter-fill" id="m-stability"></div></div>
+      <span class="sig-val" id="mv-stability">&#8212;</span>
+      <span class="sig-gloss">how settled; a steady plant earns longer harmonies</span>
+    </div>
+    <div class="sigrow2">
+      <span class="lbl">Center</span>
+      <div class="meter bipolar"><div class="meter-fill" id="m-center"></div></div>
+      <span class="sig-val" id="mv-center">&#8212;</span>
+      <span class="sig-gloss">where the signal sits in its range; pulls the melody higher or lower</span>
+    </div>
+    <div class="sigrow2">
+      <span class="lbl">Tilt</span>
+      <div class="meter bipolar"><div class="meter-fill" id="m-tilt"></div></div>
+      <span class="sig-val" id="mv-tilt">&#8212;</span>
+      <span class="sig-gloss">which way it is heading; rising leans the harmony toward tension</span>
+    </div>
+    <div class="sigrow2">
+      <span class="lbl">Weather</span>
+      <div class="meter"><div class="meter-fill" id="m-weather"></div></div>
+      <span class="sig-val" id="mv-weather">&#8212;</span>
+      <span class="sig-gloss">the day's character against its last 24 hours; sets each track's palette and pace</span>
+    </div>
+  </section>
 
-  <footer>PlantPulse 2.0 &middot; the composer in your browser &middot; <a href="https://github.com/hook-365/plantpulse-tonejs">source</a></footer>
+  <footer>
+    <a class="btn" href="https://github.com/hook-365/plantpulse-tonejs" rel="noopener">GitHub</a>
+    <a class="btn" href="https://github.com/hook-365/plantpulse-hardware" rel="noopener">Hardware</a>
+    <div class="foot-note">plantpulse 2.0 · the composer in your browser</div>
+  </footer>
 </body>
 </html>

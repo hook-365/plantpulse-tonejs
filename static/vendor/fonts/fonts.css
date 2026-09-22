@@ -1,0 +1,4 @@
+/* Instrument Serif (Astigmatic / Rodrigo Fuenzalida) and Share Tech Mono (Carrois Apostrophe), both SIL Open Font License 1.1, self-hosted so the page makes no third-party request. */
+@font-face { font-family: 'Instrument Serif'; font-style: italic; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/InstrumentSerif-italic-400.woff2) format('woff2'); }
+@font-face { font-family: 'Instrument Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/InstrumentSerif-normal-400.woff2) format('woff2'); }
+@font-face { font-family: 'Share Tech Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/vendor/fonts/ShareTechMono-normal-400.woff2) format('woff2'); }

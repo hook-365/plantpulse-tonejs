@@ -4,7 +4,7 @@
 
 PlantPulse reads the bioelectrical signal of a living plant through two alligator clips on a leaf and turns it into music, live, in your browser. Not a voltage-to-pitch mapper: a composer that hears the plant as four signals ranked against its own day and plays from them. Two rooms, a drone and a piano. About $15 of hardware, no cloud, nothing leaves your network.
 
-![PlantPulse](docs/screenshot.png)
+![PlantPulse](docs/screenshot.jpg)
 
 **[Listen live](https://plantpulse.hook.technology)**: a hibiscus performs around the clock. That site runs the project's SuperCollider engine; this repository is the free browser port of the same musical decisions, for your own plant. (The old Tone.js preset engine this repo once held is [release v1.0.0](https://github.com/hook-365/plantpulse-tonejs/releases/tag/v1.0.0).)
 
@@ -103,7 +103,7 @@ It builds the three web packs the page reads (`samples/web/`), which `docker com
 
 ### 4. Open the page
 
-`http://your-server:8286`. Pick a room, press play. The meters show the four signals and how far the ranks have warmed (they need two hours of the plant's day to leave the fixed ceiling, four to be fully its own; the page remembers the day across reloads). The line under the deck says what the band is doing: the bar, the key, the chord path, the section, the pianist's and cellist's words. `rec` saves what you hear as a `.webm`; `save take` saves the song's note log, the file `tools/take-review` grades.
+`http://your-server:8286`. Pick a room, press play. The stage shrinks and the roll opens: the leaf's voltage above, the notes it chose below, on one clock, the notes sounding as they cross the line (the composer runs three seconds ahead of the sound, so you see each note coming). Above it: the key, the room, the tempo, the pianist's and cellist's words for this song, and the track's progress. The meters under the fold show the four signals and how far the ranks have warmed (they need two hours of the plant's day to leave the fixed ceiling, four to be fully its own; the page remembers the day across reloads). `record` saves what you hear as a `.webm`; `last take` saves the finished song's note log, the file `tools/take-review` grades.
 
 Behind a reverse proxy, the stream needs buffering off:
 

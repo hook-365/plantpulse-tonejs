@@ -1,9 +1,7 @@
-//! app.js: the page. Loads the rooms and moods, wires the plant's stream
+//! app.js: boot(). Loads the rooms and moods, wires the plant's stream
 //! through signal.js into the energy model, runs the clock, and on the
 //! listener's press of play opens the audio and seats the band. The page
-//! is the chrome around it: the plant's identity, the four signals as
-//! meters, the raw trace, the room cards, the deck, and the now-playing
-//! line with the players' words.
+//! around it is ui/page.js (the stage, the roll, the meters).
 import { wireStream } from "./signal.js";
 import { BeatClock, startTicker } from "./composer/clock.js";
 import { makeContext } from "./composer/state.js";
@@ -20,10 +18,8 @@ import * as strings from "./composer/strings.js";
 import { createAudio } from "./audio/context.js";
 import { installAudio } from "./audio/player.js";
 
-const UI_KEY = "plantpulse_v2_ui";
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-export async function boot({ room = null, log = console.log } = {}) {
+export async function boot({ room = null, log = console.log, lead = 0.15 } = {}) {
   const [moodsData, roomsData] = await Promise.all([
     fetch("/static/composer/moods.json").then((r) => r.json()),
     fetch("/static/composer/rooms.json").then((r) => r.json()),
@@ -55,7 +51,9 @@ export async function boot({ room = null, log = console.log } = {}) {
   stream.source.onopen = () => { app.connected = true; app.onStatus?.("connected"); };
   stream.source.onerror = () => { app.connected = false; app.onStatus?.("reconnecting"); };
   app.stream = stream;
-  app.ticker = startTicker(clock, { workerUrl: "/static/js/composer/tick-worker.js" });
+  //! the composer runs `lead` seconds ahead of the audio: the roll sees
+  //! every note coming, and a hidden tab's throttled ticks never miss one
+  app.ticker = startTicker(clock, { workerUrl: "/static/js/composer/tick-worker.js", foreground: lead, hidden: Math.max(lead, 1.5) });
   log(`[app] composer ${roomName}: signals warming (rank buffer ${C.rawSorted.x.length}/480)`);
 
   app.play = async () => {
@@ -109,131 +107,3 @@ export async function boot({ room = null, log = console.log } = {}) {
   return app;
 }
 
-//! ---- the page
-const $ = (id) => document.getElementById(id);
-const fmt = (x, d = 2) => (x == null || Number.isNaN(x) ? "--" : x.toFixed(d));
-
-function readUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch { return {}; } }
-function writeUi(patch) { try { localStorage.setItem(UI_KEY, JSON.stringify({ ...readUi(), ...patch })); } catch { return; } }
-
-async function mountPage() {
-  const ui = readUi();
-  const params = new URLSearchParams(location.search);
-  const app = await boot({ room: params.get("room") ?? ui.room ?? null });
-  const { C } = app;
-  globalThis.__pp = app;
-
-  //! the plant's identity
-  try {
-    const cfg = await fetch("/config.json").then((r) => r.json());
-    $("plantName").textContent = cfg.plantName || "My Plant";
-    $("plantType").textContent = [cfg.plantType, cfg.location].filter(Boolean).join(" · ") || "";
-  } catch { $("plantName").textContent = "My Plant"; }
-
-  //! the rooms
-  const roomsEl = $("rooms");
-  for (const r of app.rooms.rooms) {
-    const d = document.createElement("div");
-    d.className = "room" + (r.name === app.room.name ? " active" : "");
-    d.innerHTML = `<div class="name">${r.label}</div><div class="blurb">${r.blurb}</div>`;
-    d.onclick = () => {
-      if (r.name === app.room.name) return;
-      writeUi({ room: r.name });
-      const u = new URL(location.href); u.searchParams.set("room", r.name); location.href = u.toString();
-    };
-    roomsEl.appendChild(d);
-  }
-  writeUi({ room: app.room.name });
-
-  //! the deck
-  const playBtn = $("playBtn"), vol = $("volume"), recBtn = $("recBtn"), takeBtn = $("takeBtn");
-  vol.value = ui.volume ?? 0.8;
-  app.setVolume(Number(vol.value));
-  vol.oninput = () => { app.setVolume(Number(vol.value)); writeUi({ volume: Number(vol.value) }); };
-  playBtn.onclick = async () => {
-    if (app.playing) { app.stop(); playBtn.textContent = "▶ play"; playBtn.classList.remove("on"); return; }
-    playBtn.disabled = true; playBtn.textContent = "loading…";
-    try { await app.play(); playBtn.textContent = "■ stop"; playBtn.classList.add("on"); }
-    catch (e) { console.error("[app] play failed", e); playBtn.textContent = "▶ play"; }
-    playBtn.disabled = false;
-  };
-  recBtn.onclick = () => {
-    if (app.recorder) app.stopRecord();
-    else if (!app.record()) recBtn.title = "press play first";
-  };
-  app.onRecord = (on) => { recBtn.textContent = on ? "■ stop rec" : "● rec"; recBtn.style.borderColor = on ? "var(--rose)" : ""; };
-  takeBtn.onclick = () => { if (C.lastTake) notelog.downloadTake(C.lastTake); };
-  app.onTake = () => { takeBtn.disabled = false; };
-  app.onSamples = (n, total) => { $("libraryHint").textContent = n < total ? `loading samples ${n}/${total}` : ""; };
-
-  //! status
-  const dot = $("statusDot"), statusText = $("statusText");
-  app.onStatus = (s) => { dot.className = "status-dot" + (s === "connected" ? " connected" : s === "reconnecting" ? " error" : ""); statusText.textContent = s; };
-  setInterval(() => {
-    if (app.connected && performance.now() - app.lastSignal > 15000) { dot.className = "status-dot error"; statusText.textContent = "no signal"; }
-    else if (app.connected) { dot.className = "status-dot connected"; statusText.textContent = "connected"; }
-  }, 2000);
-
-  //! the chart: the raw trace and the smoothed one over the chosen window
-  const hist = [];
-  let win = ui.win ?? 30;
-  const chart = new Chart($("plantChart").getContext("2d"), {
-    type: "line",
-    data: { datasets: [
-      { label: "raw (mV)", data: [], borderColor: "#34d399", backgroundColor: "rgba(52,211,153,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, parsing: false },
-      { label: "smoothed", data: [], borderColor: "#d4956a", backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: 0.4, fill: false, parsing: false },
-    ] },
-    options: { animation: false, responsive: true, maintainAspectRatio: false,
-      scales: { x: { type: "linear", min: -win, max: 0, ticks: { color: "#4d5d78", callback: (v) => (v === 0 ? "now" : `${v}s`) }, grid: { color: "#1a2540" } },
-                y: { ticks: { color: "#4d5d78" }, grid: { color: "#1a2540" }, title: { display: true, text: "mV", color: "#4d5d78" } } },
-      plugins: { legend: { labels: { color: "#8896b0", boxWidth: 10 } } } },
-  });
-  const winButtons = [...document.querySelectorAll(".window-selector button")];
-  const setWin = (w) => { win = w; chart.options.scales.x.min = -w; winButtons.forEach((x) => x.classList.toggle("active", Number(x.dataset.win) === w)); };
-  for (const b of winButtons) b.onclick = () => { setWin(Number(b.dataset.win)); writeUi({ win }); };
-  setWin(win);
-  app.onSignal = (f) => {
-    const t = performance.now() / 1000;
-    hist.push({ t, raw: f.raw, smooth: f.smoothed });
-    while (hist.length && t - hist[0].t > 300) hist.shift();
-    $("rawValue").innerHTML = `${fmt(f.raw, 3)} <span class="unit">mV</span>`;
-    $("smoothedValue").innerHTML = `${fmt(f.smoothed, 3)} <span class="unit">mV</span>`;
-  };
-  setInterval(() => {
-    const t = performance.now() / 1000;
-    const pts = hist.filter((h) => t - h.t <= win);
-    chart.data.datasets[0].data = pts.map((h) => ({ x: h.t - t, y: h.raw }));
-    chart.data.datasets[1].data = pts.map((h) => ({ x: h.t - t, y: h.smooth }));
-    chart.update("none");
-  }, 500);
-
-  //! the four signals and the now-playing line
-  setInterval(() => {
-    const s = C.sig;
-    $("energyValue").textContent = fmt(s.energy); $("energyMeter").style.width = `${s.energy * 100}%`;
-    $("stabValue").textContent = fmt(s.stability); $("stabMeter").style.width = `${s.stability * 100}%`;
-    $("centerValue").textContent = fmt(s.center); $("centerMeter").style.width = `${(s.center + 1) * 50}%`;
-    $("tiltValue").textContent = fmt(s.tilt); $("tiltMeter").style.width = `${(s.tilt + 1) * 50}%`;
-    $("weatherValue").textContent = fmt(s.weather); $("weatherMeter").style.width = `${s.weather * 100}%`;
-    const n = C.rawSorted.x.length;
-    $("dayHint").textContent = n >= 480 ? "ranked against the plant's own day" : n >= 240 ? `ranks warming: ${Math.round((n - 240) / 2.4)}% of the way from the fixed ceiling` : `warming up: ${Math.round(n / 2.4)}% toward the first ranks (two hours)`;
-    if (app.playing && C.chordNow) {
-      const path = C.chordPath.slice(-4).join(" ");
-      const pianist = C.touchNow?.words ? `<span class="words">${C.wordsTop(C.touchNow.words)}</span>` : "";
-      const cellist = C.stringsNow?.on ? ` · cello: <span class="words cellist">${C.wordsTop(C.stringsNow.words)}</span>` : "";
-      const sec = C.sectionNow ? ` · <b>${C.sectionNow === "B" ? "chorus" : C.sectionNow === "A" ? "verse" : C.sectionNow}</b>` : "";
-      $("now").innerHTML = `<b>${app.room.label}</b> · bar ${C.barIdx}/${C.barsTotal ?? "?"} · ${C.scaleName} on ${NOTE_NAMES[C.rootMidi % 12]} · <span class="path">${path}</span> · ${C.arcPhase ?? ""}${sec}<br>`
-        + (pianist ? `pianist: ${pianist}${cellist}` : `<span class="tag">the drone breathes with the plant: energy opens the timbre, centre and tilt sweep the vowel</span>`)
-        + (app.library && !app.library.piano && app.room.mood === "piano" ? `<br><span class="tag">piano samples not fetched: run tools/fetch-samples (drift plays without any)</span>` : "");
-    }
-  }, 1000);
-
-  //! about
-  $("aboutOpen").onclick = () => $("aboutModal").classList.add("show");
-  $("aboutClose").onclick = () => $("aboutModal").classList.remove("show");
-  $("aboutModal").onclick = (e) => { if (e.target === $("aboutModal")) $("aboutModal").classList.remove("show"); };
-}
-
-if (globalThis.document && document.getElementById("playBtn")) {
-  mountPage().catch((e) => console.error("[app] boot failed", e));
-}

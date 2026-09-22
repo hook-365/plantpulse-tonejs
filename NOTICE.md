@@ -18,6 +18,8 @@ why this repository never contains them: `tools/fetch-samples` downloads the
 archive from the Philharmonia's own bucket and prepares the cello on your
 machine. Credit the Philharmonia Orchestra if you publish audio.
 
-## Chart.js
-Chart.js contributors. MIT. Vendored as `static/vendor/chart.umd.js` (4.5.1).
-https://github.com/chartjs/Chart.js
+## Fonts
+Instrument Serif (Astigmatic, Rodrigo Fuenzalida) and Share Tech Mono (Carrois Apostrophe), SIL Open Font License 1.1, self-hosted in `static/vendor/fonts/` so the page makes no third-party request.
+
+## Room pictures
+`static/rooms/*.jpg` are the project's own artwork.
